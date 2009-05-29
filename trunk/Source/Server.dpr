@@ -1632,6 +1632,7 @@ begin
   end;
 end;
 
+//Паника
 procedure Panic_;
 var j:Integer;
 begin
@@ -1639,7 +1640,8 @@ begin
   if ThreadBe[j] then
    if SuspendThread(ThreadHnd[j])=INFINITE then
     writeln('Panic: Error ', GetLastError, ': '+SysErrorMessage(GetLastError));
- writeln('Kernel panic?');
+ writeln(#13'Kernel panic?');
+ SHOWCON:=0;
  CheckThreadsLock:=0;
  CheckThreadsLockT:=0;
  LogMsgLock:=0;
@@ -1752,6 +1754,7 @@ end;
 //Неожиданное завершение
 procedure WExit;
 begin
+ Panic_;
  LogMsg(llError, SYS, 'Fatal error at: '+IntToStr(LongWord(ErrorAddr)));
  MyExit(ExitCode);
 end;
