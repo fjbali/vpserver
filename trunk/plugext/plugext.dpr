@@ -9,8 +9,7 @@ end;
 
 function MInitProc(var h:LongWord):Boolean; export; stdcall;
 begin
- h:=0;
- MInitProc:=true;
+ MInitProc:=false;
 end;
 
 procedure MRelProc(h:LongWord); export; stdcall;
@@ -68,7 +67,7 @@ begin
  MConfProc:=false;
 end;
 
-procedure MLoadPostProc(h:LongWord;var Buf;Size:LongWord); stdcall;
+procedure MLoadPostProc(h:LongWord;var Buf;Size:LongWord); export; stdcall;
 begin
 end;
 

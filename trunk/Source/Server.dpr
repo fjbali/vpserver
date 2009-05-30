@@ -113,7 +113,7 @@ const
  WSA_INFINITE=INFINITE;    //-|-
  SYS=-1;                   //Говорит система
  MAX_L=151;                //Колличество потоков
- VER='UNKNOWN';            //Версия
+ VER='2.73alpha (r3)';     //Версия
  SERV='VPSERVER '+VER;     //Имя сервера
 
 {=======API-функции=======}
@@ -201,6 +201,8 @@ function WaitForSingleObject(hHandle:LongWord;dwMilliseconds:LongWord):LongWord;
 function LoadLibrary(lpLibFileName:PChar):LongWord; stdcall; external 'kernel32.dll' name 'LoadLibraryA';
 //Найти процедуру
 function GetProcAddress(hModule:LongWord;lpProcName:PChar):Pointer; stdcall; external 'kernel32.dll' name 'GetProcAddress';
+//Режим ошибок
+function SetErrorMode(uMode:LongWord):LongWord; stdcall; external 'kernel32.dll';
 
 {=======Вспомогательные функции=======}
 
@@ -1160,7 +1162,7 @@ h:   if ppath[1]=#13 then
    if hn='Connection' then
     begin  //Устанавливаем режим подключения
      if Pos('Keep-Alive', val)=1 then //Есть Keep-Alive
-      KAlive:=true
+      KAlive:=false
      else
       if Pos('close', val)=1 then //Есть close
        KAlive:=false;
@@ -1632,6 +1634,14 @@ begin
   end;
 end;
 
+var i:Integer;
+    c:Integer=-1;
+    F, SysLog:Text;
+    cll, fll:LogLev;
+    flpath, s:String;
+    SHOWCON:Integer;
+    consolev:Boolean=true;
+
 //Паника
 procedure Panic_;
 var j:Integer;
@@ -1651,14 +1661,6 @@ begin
  SetEvent(TerminateAllThreadsLockE);
  TerminateAllThreads(SYS);
 end;
-
-var i:Integer;
-    c:Integer=-1;
-    F, SysLog:Text;
-    cll, fll:LogLev;
-    flpath, s:String;
-    SHOWCON:Integer;
-    consolev:Boolean=true;
 
 //Получить имя файла по номеру потока
 function FormLogFile(i:Integer):String;
@@ -1715,7 +1717,11 @@ begin
  LogMsgLockT:=0;
  if not SetEvent(LogMsgLockE) then
   Panic;
- InterlockedDecrement(LogMsgLock);
+ asm
+  push OFFSET LogMsgLock
+  call InterlockedDecrement
+ end;
+// InterlockedDecrement(LogMsgLock);
 end;
 
 //Ожидание
@@ -2001,6 +2007,7 @@ begin
 end;
 
 begin
+ SetErrorMode(1);
  //Устанавливаем Home как папку, в которой лежит Server.exe
  flpath:=ParamStr(0);
  while (Length(flpath)>0) and (flpath[Length(flpath)]<>'\') do
