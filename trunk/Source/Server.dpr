@@ -95,7 +95,7 @@ type
  TMLoadGetProc=procedure(h:LongWord;GETLine:PChar); stdcall;
  TMLoadMeth=procedure(h:LongWord;Meth:PChar); stdcall;
  TMQueryProc=function(h:LongWord;PartOP, OptOP, KAlive, PostOP:Boolean;ppath:PChar):Boolean; stdcall;
- TMUpdateParamsProc=function(h:LongWord;var PartOP, OptOP, KAlive:Boolean;resph:PChar):LongWord; stdcall;
+ TMUpdateParamsProc=function(h:LongWord;var PartOP, OptOP, KAlive, SCLen:Boolean;resph:PChar):LongWord; stdcall;
  TMGetHLine=function(h:LongWord;n:LongWord;main:Boolean):PChar; stdcall;
  TMSetPosProc=function(h:LongWord;var ofs:Longint):Boolean; stdcall;
  TMReadProc=procedure(h:LongWord;var Buf;BufSize:LongWord;var RealRead:Longint); stdcall;
@@ -419,9 +419,11 @@ begin
  while ThreadCount<mx do
   begin
    if not f then
-    LogMsg(llAll, s, 'Starting threads...');
+    begin
+     f:=true;
+     LogMsg(llAll, s, 'Starting threads...');
+    end;
    CreateThreadListener(s);
-   f:=true;
   end;
  f:=false;
  for i:=1 to MAX_L do          //Проверка по всем потокам
@@ -678,7 +680,7 @@ procedure ProcessFile;
 var Mime:TextFile;
     Resp, cont, rcont:String;
     j, rcl, mr, mc, t, ac, tofs:Longint;
-    ms, mp:Boolean;
+    ms, mp, SCLen:Boolean;
     md:LongWord;
 const Req='Request to: ';
       clst='Content-Length: ';
@@ -734,9 +736,10 @@ begin
      Exit;
     end;
   end;
+ SCLen:=true;
  StrToBuf(resph);
  if PAcc then
-  md:=MUpdateParamsProc(hmod, PartOP, OptOP, KAlive, PChar(@rbuf));
+  md:=MUpdateParamsProc(hmod, PartOP, OptOP, KAlive, SCLen, PChar(@rbuf));
  BufToStr(resph);
  ac:=0;
  tofs:=-1;
@@ -810,11 +813,12 @@ begin
    r:='';
    rcl:=tofs+1; //Размер содержимого
    if not Err then
-    begin  //Сообщаем данные о файле и факт возможности использования Range
-     if not PAcc then
+    if not PAcc then
+     begin //Сообщаем данные о файле и факт возможности использования Range
       Resp:=Resp+'Last-Modified: '+FormatSysTime(FileLastWriteDate(ppath))+nl;
-     Resp:=Resp+acrc+'bytes'+nl;
-    end
+      Resp:=Resp+acrc+'bytes'+nl;
+     end
+    else
    else //Использовать Range нельзя
     Resp:=Resp+acrc+'none'+nl;
    if PartOP then //Если используем Range
@@ -863,7 +867,7 @@ begin
         end;
       end;
     end;
-   if not (mp or PAcc) then
+   if not (mp or SCLen) then
     begin
      Resp:=Resp+clst+IntToStr(rcl)+nl;
      if rcont<>'' then //Нашли - отправляем
@@ -929,7 +933,7 @@ begin
      Resp:=Resp+nl;
     end;
    dec(ac);
-   if ms then    //Заголовок
+   if ms then   //Заголовок
     begin
      mr:=1;
      mc:=Length(Resp);
@@ -1162,7 +1166,7 @@ h:   if ppath[1]=#13 then
    if hn='Connection' then
     begin  //Устанавливаем режим подключения
      if Pos('Keep-Alive', val)=1 then //Есть Keep-Alive
-      KAlive:=false
+      KAlive:=true
      else
       if Pos('close', val)=1 then //Есть close
        KAlive:=false;

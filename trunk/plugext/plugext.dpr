@@ -43,7 +43,7 @@ begin
  MQueryProc:=false;
 end;
 
-function MUpdateParamsProc(h:LongWord;var PartOP, OptOP, KAlive:Boolean;resph:PChar):LongWord; export;
+function MUpdateParamsProc(h:LongWord;var PartOP, OptOP, KAlive, SCLen:Boolean;resph:PChar):LongWord; export;
 begin
  MUpdateParamsProc:=0;
 end;

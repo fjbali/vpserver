@@ -29,8 +29,8 @@ procedure MLoadMeth(h:LongWord;Meth:PChar);
 bool MQueryProc(DWORD h, bool PartOP, bool OptOP, bool KAlive, bool PostOP, char *ppath);
 function MQueryProc(h:LongWord;PartOP, OptOP, KAlive, PostOP:Boolean;ppath:PChar):Boolean;
 
-DWORD MUpdateParamsProc(DWORD h, bool *PartOP, bool *OptOP, bool *KAlive, char *resph);
-function MUpdateParamsProc(h:LongWord;var PartOP, OptOP, KAlive:Boolean;resph:PChar):LongWord;
+DWORD MUpdateParamsProc(DWORD h, bool *PartOP, bool *OptOP, bool *KAlive, bool *SCLen, char *resph);
+function MUpdateParamsProc(h:LongWord;var PartOP, OptOP, KAlive, SCLen:Boolean;resph:PChar):LongWord;
 
 char *MGetHLine(DWORD h, DWORD n, bool main);
 function MGetHLine(h:LongWord;n:LongWord;main:Boolean):PChar;
@@ -84,3 +84,11 @@ III. Работа с памятью
  Т.к. работа с памятью - важный аспект работы сервера, то эта информация вынесена в отдельную главу
 
  Общий принцип такой: после завершения MRelProc программа должна занимать столько же памяти, сколько до вызова MInitProc. Размер буфера для char * - 256 символов. Если программа записывает данные в этот буфер, она не должна его переполнить. Если это строка, то 256 символ обязан быть нулём. Если функция возвращает тип char *, то память, выделенная под буфер должна быть освобождена до завершения MRelProc
+
+IV. Примечание к изменениям стандарта с версии 2.7
+
+ Главным отличием является метод MGetHLine. У него появился параметр 'main'.
+
+ 'main' принимает значение true, если заголовки запрашиваются к главному ответу. Если используется Content-Range, то к каждому (при условии, если он не один) промежутку будут запрашиваться заголовки с 'main', равным false. Таким образом, модуль может (но не обязан - сделано для расширения количества методов, которых поддерживает сервер) добавить заголовок Accept-Ranges в главном блоке, когда как в дополниельных это недопустимо
+
+ У метода MUpdateProc появился параметр SCLen, который позволяет модулю контролировать отправку заголовка Content-Length
