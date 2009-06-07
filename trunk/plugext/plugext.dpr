@@ -71,9 +71,13 @@ procedure MLoadPostProc(h:LongWord;var Buf;Size:LongWord); export; stdcall;
 begin
 end;
 
+procedure MGetSMeth(h:LongWord;n:LongWord;Str:PChar); export; stdcall;
+begin
+end;
+
 exports MGetInfo, MInitProc, MRelProc, MMethProc, MHeadProc, MLoadProc, MLoadGetProc,
         MLoadMeth, MQueryProc, MUpdateParamsProc, MGetHLine, MSetPosProc, MReadProc,
-        MConfProc, MLoadPostProc;
+        MConfProc, MLoadPostProc, MGetSMeth;
 
 begin
  Move(PChar('plugext 1.0 Build 1 Copyright (c) Ivanov Viktor 2009')^, gbuf, 53);

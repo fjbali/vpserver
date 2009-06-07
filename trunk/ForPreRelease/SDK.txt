@@ -44,6 +44,9 @@ procedure MReadProc(h:LongWord;var Buf;BufSize:LongWord;var RealRead:LongInt);
 bool MConfProc(char *s);
 function MConfProc(s:PChar):Boolean;
 
+void MGetSMeth(DWORD h, DWORD n, char *Str);
+procedure MGetSMeth(h:LongWord;n:LongWord;Str:PChar);
+
 II. ѕринцип работы
 
  ћодуль загружаетс€ на этапе чтени€ конфигурации (параметр Plugin)
@@ -92,3 +95,5 @@ IV. ѕримечание к изменени€м стандарта с версии 2.7
  'main' принимает значение true, если заголовки запрашиваютс€ к главному ответу. ≈сли используетс€ Content-Range, то к каждому (при условии, если он не один) промежутку будут запрашиватьс€ заголовки с 'main', равным false. “аким образом, модуль может (но не об€зан - сделано дл€ расширени€ количества методов, которых поддерживает сервер) добавить заголовок Accept-Ranges в главном блоке, когда как в дополниельных это недопустимо
 
  ” метода MUpdateProc по€вилс€ параметр SCLen, который позвол€ет модулю контролировать отправку заголовка Content-Length
+
+ — помощью MGetSMeth программа получает дополнительные методы, которые поддерживает плагин (n=1 -> дл€ Allow, n=2 -> дл€ Public)

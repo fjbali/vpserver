@@ -100,6 +100,7 @@ type
  TMSetPosProc=function(h:LongWord;var ofs:Longint):Boolean; stdcall;
  TMReadProc=procedure(h:LongWord;var Buf;BufSize:LongWord;var RealRead:Longint); stdcall;
  TMConfProc=function(s:PChar):Boolean; stdcall;
+ TMGetSMeth=procedure(h:LongWord;n:LongWord;Str:PChar);
 
 {=======Основные константы=======}
 
@@ -113,7 +114,7 @@ const
  WSA_INFINITE=INFINITE;    //-|-
  SYS=-1;                   //Говорит система
  MAX_L=151;                //Колличество потоков
- VER='2.73alpha (r3)';     //Версия
+ VER='2.74alpha';          //Версия
  SERV='VPSERVER '+VER;     //Имя сервера
 
 {=======API-функции=======}
@@ -353,6 +354,7 @@ var MGetInfo:TMGetInfo=nil;
     MSetPosProc:TMSetPosProc=nil;
     MReadProc:TMReadProc=nil;
     MConfProc:TMConfProc=nil;
+    MGetSMeth:TMGetSMeth=nil;
     PlugInst:Boolean=false;
 
 {=======Основные переменные=======}
@@ -678,7 +680,7 @@ end;
 //Обработка файла
 procedure ProcessFile;
 var Mime:TextFile;
-    Resp, cont, rcont:String;
+    Resp, cont, rcont, alc, puc:String;
     j, rcl, mr, mc, t, ac, tofs:Longint;
     ms, mp, SCLen:Boolean;
     md:LongWord;
@@ -687,6 +689,8 @@ const Req='Request to: ';
       acrc='Accept-Ranges: ';
       crb='Content-Range: bytes ';
       cnt='Content-Type: ';
+      al='Allow: ';
+      pu='Public: ';
       bndr='VPSERVERBNDR';
       nl=#13#10;
 procedure AddMHead(main:Boolean);
@@ -737,10 +741,12 @@ begin
     end;
   end;
  SCLen:=true;
- StrToBuf(resph);
  if PAcc then
-  md:=MUpdateParamsProc(hmod, PartOP, OptOP, KAlive, SCLen, PChar(@rbuf));
- BufToStr(resph);
+  begin
+   StrToBuf(resph);
+   md:=MUpdateParamsProc(hmod, PartOP, OptOP, KAlive, SCLen, PChar(@rbuf));
+   BufToStr(resph);
+  end;
  ac:=0;
  tofs:=-1;
  if PAcc then
@@ -805,8 +811,19 @@ begin
  Resp:=Resp+nl+'Date: '+GetFormatedTime+nl+'Server: '+SERV+nl; //Информация о сервере (ID и дата)
  rcont:='';
  //Собщить о том, что поддерживает сервер?
+ alc:='GET, POST, HEAD, OPTIONS';
+ puc:=alc+', PUT, PATCH, DELETE, TRACE, CONNECT, LINK, UNLINK';
+ if PAcc then
+  begin
+   StrToBuf(alc);
+   MGetSMeth(hmod, 1, PChar(@rbuf));
+   BufToStr(alc);
+   StrToBuf(puc);
+   MGetSMeth(hmod, 2, PChar(@rbuf));
+   BufToStr(puc);
+  end;
  if OptOP then
-  Resp:=Resp+'Allow: GET, POST, HEAD, OPTIONS'+nl+'Public: GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE, TRACE, CONNECT, LINK, UNLINK'+nl;
+  Resp:=Resp+al+alc+nl+pu+puc+nl;
  if (ppath[1]<>#13) or PAcc then
   begin
    //Отправляем файл
@@ -1018,10 +1035,12 @@ label h, f; //Пришлось использовать метки (чтобы не переписывать весь код)
 var p:Pointer;
     ps, tr:Longint;
 begin
- StrToBuf(ppath);
  if NPlugInst and (copy(ppath, 1, 1)<>#13) then
-  MLoadGetProc(hmod, PChar(@rbuf));
- BufToStr(ppath);
+  begin        
+   StrToBuf(ppath);
+   MLoadGetProc(hmod, PChar(@rbuf));
+   BufToStr(ppath);
+  end;
  if Pos('?', ppath)<>0 then
   ppath:=copy(ppath, 1, Pos('?', ppath)-1); //Нам GET-параметры не нужны
  if Pos('#', ppath)<>0 then
@@ -1045,10 +1064,12 @@ begin
    val:=copy(r, Pos(':', r)+2, Length(r)-Pos(':', r)-1); //Значение
    ReformStr(val); //BUG ALL VPSERVER - поддержка %xy
    PAcc:=false;
-   StrToBuf(val);
    if NPlugInst then
-    PAcc:=MHeadProc(hmod, PChar(hn), PChar(@rbuf));
-   BufToStr(val);
+    begin     
+     StrToBuf(val);
+     PAcc:=MHeadProc(hmod, PChar(hn), PChar(@rbuf));
+     BufToStr(val);
+    end;
    if hn='Host' then
     begin  //Выбираем хост
 h:   if ppath[1]=#13 then
@@ -1529,13 +1550,13 @@ begin
   begin //Не нашли
    if c=5000 then
     begin //Уже 5 сиунд ждём
-     LogMsg(llError, s, 'Request was not been processed for 5 seconds! Terminating threads!');
+     LogMsg(llError, s, 'Request has not been processed for 5 seconds! Terminating threads!');
      TerminateAllThreads(s); //Вырубить всё на...
      Exit;
     end;
    //Пока ждём...
    if c=0 then
-    LogMsg(llError, s, 'The quantity of streams is higher than a limit! Please check up your computer on network attack');
+    LogMsg(llError, s, 'Number of threads exceeds the limit. Check your computer to a network attack');
    LogMsg(llAll, s, 'Waiting for a second...');
    Sleep(1000);
    LogMsg(llAll, s, 'Trying again');
@@ -1985,12 +2006,13 @@ begin
         @MGetHLine:=GetProcAddress(m, 'MGetHLine');
         @MSetPosProc:=GetProcAddress(m, 'MSetPosProc');
         @MReadProc:=GetProcAddress(m, 'MReadProc');
-        @MConfProc:=GetProcAddress(m, 'MConfProc');
+        @MConfProc:=GetProcAddress(m, 'MConfProc');    
+        @MGetSMeth:=GetProcAddress(m, 'MGetSMeth');
         PlugInst:=(@MGetInfo<>nil) and (@MInitProc<>nil) and (@MRelProc<>nil) and
                   (@MMethProc<>nil) and (@MHeadProc<>nil) and (@MLoadPostProc<>nil) and
                   (@MLoadGetProc<>nil) and (@MLoadMeth<>nil) and (@MQueryProc<>nil) and
                   (@MUpdateParamsProc<>nil) and (@MGetHLine<>nil) and (@MSetPosProc<>nil) and
-                  (@MReadProc<>nil) and (@MConfProc<>nil);
+                  (@MReadProc<>nil) and (@MConfProc<>nil) and (@MGetSMeth<>nil);
        end;
       if not PlugInst then
        begin
