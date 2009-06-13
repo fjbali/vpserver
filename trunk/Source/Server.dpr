@@ -227,7 +227,7 @@ asm
  jns @C2
  neg eax
  call @C2
- mov al, '-'
+ mov al, 45
  inc ecx
  dec esi
  mov [esi], al
@@ -241,10 +241,10 @@ asm
  xor edx, edx
  div ecx
  dec esi
- add dl, '0'
- cmp dl, '0'+10
+ add dl, 48
+ cmp dl, 58
  jb @D2
- add dl, ('A'-'0')-10
+ add dl, 7
 @D2:
  mov [esi], dl
  or eax, eax
@@ -255,7 +255,7 @@ asm
  sub edx, ecx
  jbe @D5
  add ecx, edx
- mov al, '0'
+ mov al, 48
  sub esi, edx
  jmp @z
 @zloop:
@@ -752,7 +752,10 @@ begin
  if PAcc then
   PartOP:=MSetPosProc(hmod, tofs)
  else
-  tofs:=FileSize(ThreadFl[i])-1;
+  if ppath[1]=#13 then
+   tofs:=0
+  else
+   tofs:=FileSize(ThreadFl[i])-1;
  if PartOP and (not Err) and (ppath[1]<>#13) then  //Перебираем список
   begin
    if enofs=-1 then
@@ -810,20 +813,23 @@ begin
  LogMsg(llNotice, i, 'Response: '+Resp); //Мы отвечаем вот это
  Resp:=Resp+nl+'Date: '+GetFormatedTime+nl+'Server: '+SERV+nl; //Информация о сервере (ID и дата)
  rcont:='';
- //Собщить о том, что поддерживает сервер?
- alc:='GET, POST, HEAD, OPTIONS';
- puc:=alc+', PUT, PATCH, DELETE, TRACE, CONNECT, LINK, UNLINK';
- if PAcc then
-  begin
-   StrToBuf(alc);
-   MGetSMeth(hmod, 1, PChar(@rbuf));
-   BufToStr(alc);
-   StrToBuf(puc);
-   MGetSMeth(hmod, 2, PChar(@rbuf));
-   BufToStr(puc);
-  end;
  if OptOP then
-  Resp:=Resp+al+alc+nl+pu+puc+nl;
+  begin
+   //Собщить о том, что поддерживает сервер?
+   alc:='GET, POST, HEAD, OPTIONS';
+   puc:=alc+', PUT, PATCH, DELETE, LINK, UNLINK';
+   if PAcc then
+    begin
+     StrToBuf(alc);
+     MGetSMeth(hmod, 1, PChar(@rbuf));
+     BufToStr(alc);
+     StrToBuf(puc);
+     MGetSMeth(hmod, 2, PChar(@rbuf));
+     BufToStr(puc);
+    end;
+   Resp:=Resp+al+alc+nl+pu+puc+nl;
+   OptOP:=not Err;
+  end;
  if (ppath[1]<>#13) or PAcc then
   begin
    //Отправляем файл
@@ -884,7 +890,7 @@ begin
         end;
       end;
     end;
-   if not (mp or SCLen) then
+   if (not mp) and SCLen then
     begin
      Resp:=Resp+clst+IntToStr(rcl)+nl;
      if rcont<>'' then //Нашли - отправляем
@@ -1050,9 +1056,17 @@ begin
  if Pos('://', ppath)<>0 then //Поддержка абсолютного URL
   begin
    LogMsg(llNotice, i, 'Warning! Absolute URL!');
-   Delete(ppath, 1, Pos('://', ppath)+3);
-   val:=copy(ppath, 1, Pos('/', ppath)-1);
-   Delete(ppath, 1, Pos('/', ppath));
+   Delete(ppath, 1, Pos('://', ppath)+2);
+   if Pos('/', ppath)<>0 then
+    begin
+     val:=copy(ppath, 1, Pos('/', ppath)-1);
+     Delete(ppath, 1, Length(val));
+    end
+   else
+    begin
+     val:=ppath;
+     ppath:='/';
+    end;
    goto h; //Установить хост
   end;
  while true do
@@ -1063,13 +1077,14 @@ begin
    hn:=copy(r, 1, Pos(':', r)-1); //Название
    val:=copy(r, Pos(':', r)+2, Length(r)-Pos(':', r)-1); //Значение
    ReformStr(val); //BUG ALL VPSERVER - поддержка %xy
-   PAcc:=false;
    if NPlugInst then
     begin     
      StrToBuf(val);
      PAcc:=MHeadProc(hmod, PChar(hn), PChar(@rbuf));
      BufToStr(val);
-    end;
+    end
+   else
+    PAcc:=false;
    if hn='Host' then
     begin  //Выбираем хост
 h:   if ppath[1]=#13 then
@@ -1268,7 +1283,7 @@ f: if GetLastError=0 then //Не было ошибки - превышен лимит ожидания
    o:=o+PostCL;
   end;
  //Если ошибка сервера или 400 Bad Request, то делаем соединение закрытым
- if (Err and ((copy(resph, 1, 1)='5') or (copy(resph, 1, 3)='400'))) or FErr then
+ if Err or FErr then
   begin
    LogMsg(llAll, i, 'Set connection mode to "close"');
    KAlive:=false;
@@ -1358,7 +1373,7 @@ begin
   end;
  if (meth=GetMeth) and (resph='') then //Метод GET - найти файл
   FindPath;
- if (meth='PUT') or (meth='PATCH') or (meth='DELETE') or (meth='TRACE') or (meth='CONNECT') or (meth='LINK') or (meth='UNLINK') then
+ if (meth='PUT') or (meth='PATCH') or (meth='DELETE') or (meth='LINK') or (meth='UNLINK') then
   begin //Методы недопустимы!
    resph:='405 Method Not Allowed';
    ppath:=#13'error405.html';
@@ -1767,6 +1782,7 @@ procedure MyExit(ReturnCode:Integer);
 var k:Integer;
     le:LongWord;
 begin
+ ExitProc:=LEP;
  le:=GetLastError;
  TerminateAllThreads(SYS); //Завершаем потоки
  LogMsg(llError, SYS, 'Exit code: '+IntToStr(ReturnCode));
@@ -1779,7 +1795,6 @@ begin
  //Закрываем сокет
  closesocket(ListenSocket);
  MyWait;
- ExitProc:=LEP;
 end;
 
 //Неожиданное завершение
@@ -2033,7 +2048,7 @@ begin
 end;
 
 begin
- SetErrorMode(1);
+ SetErrorMode($8005);
  //Устанавливаем Home как папку, в которой лежит Server.exe
  flpath:=ParamStr(0);
  while (Length(flpath)>0) and (flpath[Length(flpath)]<>'\') do
@@ -2243,3 +2258,4 @@ begin
  LogMsg(llError, SYS, 'DoExit command!');
  MyExit(0); //Выход
 end.
+
