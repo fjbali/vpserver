@@ -3,6 +3,8 @@ program Server;
 {$APPTYPE CONSOLE}
 {$H+} {Использум длинные строки!}
 
+uses md5;
+
 {=======Объявление типов=======}
 
 type
@@ -85,22 +87,38 @@ type
  LogLev=(llAll, llNotice, llError); //Уровни лога
 
 {=======Функции плагина=======}
-
+ //Info
  TMGetInfo=function:PChar; stdcall;
+ //Инициализация
  TMInitProc=function(var h:LongWord):Boolean; stdcall;
+ //Деинициализация
  TMRelProc=procedure(h:LongWord); stdcall;
+ //Обработка метода
  TMMethProc=function(h:LongWord;Meth:PChar):Boolean; stdcall;
+ //Обработка заголовков
  TMHeadProc=function(h:LongWord;HName:PChar;HVal:PChar):Boolean; stdcall;
+ //Обработка POST
  TMLoadPostProc=procedure(h:LongWord;var Buf;Size:LongWord); stdcall;
+ //Обработка GET
  TMLoadGetProc=procedure(h:LongWord;GETLine:PChar); stdcall;
+ //Запрос метода
  TMLoadMeth=procedure(h:LongWord;Meth:PChar); stdcall;
- TMQueryProc=function(h:LongWord;PartOP, OptOP, KAlive, PostOP:Boolean;ppath:PChar):Boolean; stdcall;
- TMUpdateParamsProc=function(h:LongWord;var PartOP, OptOP, KAlive, SCLen:Boolean;resph:PChar):LongWord; stdcall;
- TMGetHLine=function(h:LongWord;n:LongWord;main:Boolean):PChar; stdcall;
+ //Опрос обработки
+ TMQueryProc=function(h:LongWord;PartOP, OptOP, KAlive, PostOP:Boolean;ppath:PChar):Byte; stdcall;
+ //Измененине констант обработки запроса
+ TMUpdateParamsProc=procedure(h:LongWord;var PartOP, OptOP, KAlive, SCLen:Boolean;resph:PChar); stdcall;
+ //Получить дополнительный заголовок ответа
+ TMGetHLine=function(h:LongWord;n:LongWord):PChar; stdcall;
+ //Установить позицию
  TMSetPosProc=function(h:LongWord;var ofs:Longint):Boolean; stdcall;
+ //Прочитать данные
  TMReadProc=procedure(h:LongWord;var Buf;BufSize:LongWord;var RealRead:Longint); stdcall;
+ //Обработать строку конфигурации
  TMConfProc=function(s:PChar):Boolean; stdcall;
+ //Изменить список поддерживаемых методов
  TMGetSMeth=procedure(h:LongWord;n:LongWord;Str:PChar);
+ //Получить клличество доп. заголовков
+ TMGetHAm=function(main:Byte):LongWord;
 
 {=======Основные константы=======}
 
@@ -113,8 +131,8 @@ const
  INFINITE=$FFFFFFFF;       //Ждать до потери пульса
  WSA_INFINITE=INFINITE;    //-|-
  SYS=-1;                   //Говорит система
- MAX_L=151;                //Колличество потоков
- VER='2.74alpha';          //Версия
+ MAX_L=151;                //Количество потоков
+ VER='2.75alpha';          //Версия
  SERV='VPSERVER '+VER;     //Имя сервера
 
 {=======API-функции=======}
@@ -337,6 +355,14 @@ begin
  for i:=1 to Length(s) do
   Result[i]:=UpCase(Result[i]);
 end;
+//Получить MD5-хэш
+function GetMD5(var Buf;Size:LongWord):String;
+var k:md5_state;
+begin
+ md5_init(k);
+ md5_append(k, Buf, Size);
+ GetMD5:=md5_finish(k);
+end;
 
 {=======Функции модуля======}
 
@@ -354,8 +380,9 @@ var MGetInfo:TMGetInfo=nil;
     MSetPosProc:TMSetPosProc=nil;
     MReadProc:TMReadProc=nil;
     MConfProc:TMConfProc=nil;
+    MGetHAm:TMGetHAm=nil;
     MGetSMeth:TMGetSMeth=nil;
-    PlugInst:Boolean=false;
+    PlugInst:Boolean=false;  //Флаг загрузки плагина
 
 {=======Основные переменные=======}
 
@@ -389,15 +416,19 @@ procedure MyQuit(ReturnCode:Integer); forward;          //Принудительное заверше
 procedure MyHalt(ReturnCode:Integer); forward;          //Фатальное завершение
 function FormatSysTime(t:TSystemTime):String; forward;  //Форматировать время/дату
 function GetFormatedTime:String; forward;               //Получить форматированное время/дату
+procedure CheckThreads(s:Integer); forward;             //Проверить состояние потоков
 
 {=======Начало сервера=======}
 
+//Процедура потока паники
 function PanicP(a:Pointer):Integer;
 begin
  Result:=0;
- Panic_;
+ Panic_;    //Паника
+ CheckThreads(SYS); //Запуск сервера
 end;
 
+//Запуск потока паники
 procedure Panic;
 var ID:LongWord;
 begin
@@ -411,15 +442,16 @@ var i:Integer;
     f:Boolean;
 begin
  if InterlockedIncrement(CheckThreadsLock)<>1 then
-  begin
+  begin //Мы не первые?
    InterlockedDecrement(CheckThreadsLock);
    LogMsg(llAll, s, 'CheckThreads is already started by other thread');
    Exit;
   end;
- CheckThreadsLockT:=GetCurrentThreadId;
+ //FIXME: Внимание! Гонки!
+ CheckThreadsLockT:=GetCurrentThreadId; //Сохраняем значение ID потока
  f:=false;
  while ThreadCount<mx do
-  begin
+  begin //Поддерживаем количество слушателей
    if not f then
     begin
      f:=true;
@@ -440,6 +472,7 @@ begin
    LogMsg(llAll, s, 'No threads are free! Create new!');
    CreateThreadListener(s);      //Создать новый поток
   end;
+ //Сброс
  CheckThreadsLockT:=0;
  InterlockedDecrement(CheckThreadsLock);
 end;
@@ -450,10 +483,16 @@ const
 
 //Процедура потока
 function ThreadProc(Index:PInteger):Integer;
+type TCond=record
+  isInst:Boolean;
+  isTrue:Boolean;
+  val:String;
+ end;
 var EventTotal:Longint;
     EventArray:array[0..63] of WSAEVENT;
     i:Integer;
     UKAlive, FErr:Boolean;
+    cond1, cond2:TCond;
 //Функция отправки/получения данных
 function SendRecvBuf(var buf;len:Longint;r:Boolean):Longint;
 var DataBuf:WSABUF;
@@ -492,7 +531,7 @@ begin
     else
      w:=BTimeOut; //Ждём 5 секунд - если плохое соединение
     EIndex:=WSAWaitForMultipleEvents(EventTotal, @EventArray, false, w, false);
-    if EIndex<>$102 then
+    if EIndex<>$102 then  //$102 - timeout
      begin
       WSAResetEvent(EventArray[EIndex]);
       WSAGetOverlappedResult(ThreadSock[i], @AcceptOverlapped, @BytesTransferred, false, @flags);
@@ -500,14 +539,14 @@ begin
     else
      begin
       SetLastError(0);
-      FErr:=true;
+      FErr:=true;      //Флаг ошибки IO
      end;
    end
  else
   BytesTransferred:=SentRecvBytes;
  if BytesTransferred<>0 then
   WSACloseEvent(EventArray[EIndex]);
- Result:=BytesTransferred; //Возвращаем колличество переданных/принятых байт
+ Result:=BytesTransferred; //Возвращаем количество переданных/принятых байт
  if WSAGetLastError=WSA_IO_PENDING then
   SetLastError(0); //Игнорируем IO_PENDING
 end;
@@ -529,82 +568,92 @@ type
   EndR:Longint;    //Конец
   Next:PContRang;  //Следующий
  end;
+//Entity Tags
+type Tfetag=record
+ DateTime:TSystemTime;
+ Size:LongWord;
+end;
 var wholen:Integer;
     who:sockaddr_in;
     buf:array[1..4096] of Byte;
     buf2:array[1..4096] of Char absolute buf;
     sz, o, arecv, asent, stofs, enofs, PostCL:Longint;
     r, HttpV, resph, ppath, val:String;
-    HeadOP, PartOP, Err, OptOP, KAlive, PostOP, NPlugInst, PAcc:Boolean;
+    HeadOP, PartOP, Err, OptOP, KAlive, PostOP, NPlugInst, PAcc, IsBas, IncET:Boolean;
     contr, curr, lr:PContRang;
-    hmod:LongWord;
+    hmod:LongWord;           
+    fetag:Tfetag;
     rbuf:array[Byte] of Char;
 //Преобразовать строку
 procedure ReformStr(var s:String);
+//Hex to DWORD
 function Hex(c:Char):LongWord;
 begin
- if ord(c)<ord('A') then
+ if ord(c)<ord('A') then        //Если неправильная буква - переполнение
   Hex:=ord(c)-ord('0')+((ord(c)-ord('0')) div 10)*1000
  else
   Hex:=ord(c)-ord('A')+10+((ord(c)-ord('A')) div 6)*1000;
 end;
+//Unicode to ANSI
 function UnicodeToChar(u:LongWord):Char;
 begin
+ //Свою писать было лень
  UnicodeToChar:=WideCharLenToString(PWideChar(@u), 1)[1];
 end;
 var ps, ns, ls, cc, l:LongWord;
     t:Longint;
 begin
- while Pos('%', s)<>0 do
+ while Pos('%', s)<>0 do  //Ищем %
   begin
    ps:=Pos('%', s);
-   ns:=1;
-   cc:=ns;
+   ns:=1; //Ост. количество проверяемых символов
+   cc:=ns; //Полное количество
    ls:=0;
    while ns<>0 do
     begin
-     t:=ps+(cc-1)*3;
-     if ((Length(s)-t)<2) or (s[t]<>'%') then
-      l:=255
+     t:=ps+(cc-1)*3; //Позиция символов
+     if ((Length(s)-t)<2) or (s[t]<>'%') then //Есть ли %?
+      l:=255 //Переполнение
      else
       l:=Hex(s[t+2])+Hex(s[t+1])*16;
      if l>254 then
-      begin
+      begin  //Переволнение
        cc:=2;
        l:=0;
       end;
-     t:=0;
+     t:=0; //Количество единиц
      while odd(l shr (7-t)) do
       inc(t);
      if t>0 then
-      inc(ns, t-1)
+      inc(ns, t-1) //Увеличиваем количество байт
      else
       if cc<>1 then
-       begin
+       begin  //Переполнение -> ошибка
         ls:=0;
         break;
        end;
-     dec(ns);
+     dec(ns); //Один проверили
      inc(cc);
+     //Изменяем значение символа (добавляем)
      ls:=(ls shl (7-t)) or (l and (not (((1 shl t)-1) shl (8-t))));
     end;
-   if ls=0 then
-    Delete(s, ps, 1)
+   if ls=0 then       //Ошибка?
+    Delete(s, ps, 1)  //Удаляем %
    else
     begin
-     Delete(s, ps+1, (cc-1)*3-1);
-     s[ps]:=UnicodeToChar(ls);
+     Delete(s, ps+1, (cc-1)*3-1); //Удаляем строку
+     s[ps]:=UnicodeToChar(ls);  //Вставляем 1 символ
      if (s[ps]='?') and (ls<>ord('?')) then
-      s[ps]:=#1;
+      s[ps]:=#1;  //Вопрос заменяем на '_'
      if s[ps]='%' then
-      s[ps]:=#1
+      s[ps]:=#1   //% нужно сохранить
      else
       if ord(s[ps])<32 then
        s[ps]:='_';
     end;
   end;
  while Pos(#1, s)<>0 do
-  s[Pos(#1, s)]:='%';
+  s[Pos(#1, s)]:='%';   //Восстанавливаем %
 end;
 //Получить следующую строку
 procedure FormNextStr;
@@ -661,21 +710,57 @@ begin
    contr:=curr;
   end;
 end;
+//Строка -> буфер
 procedure StrToBuf(s:String);
 var l:String;
 begin
  l:=s;
  if Length(l)>255 then
-  SetLength(l, 255);
- Move(PChar(l)^, rbuf, Length(l)+1);
+  SetLength(l, 255);  //Ограничение на длину
+ move(PChar(l)^, rbuf, Length(l)+1);
 end;
+//Буфер -> строка
 procedure BufToStr(var s:String);
 var k:LongWord;
 begin
  k:=0;
+ //Поиск конца
  while (rbuf[k]<>#0) and (k<255) do
   inc(k);
  SetString(s, PChar(@rbuf), k);
+end;
+//Строгое сравнение тэгов сущностей
+function MComp(m, n:String):Boolean;
+var c1, c2:String;
+begin
+ MComp:=true;
+ c1:=UpString(n);
+ while true do
+  begin
+   //Удаляем лишние символы
+   while (Length(c1)>0) and (not (c1[1] in ['0'..'9', 'A'..'Z'])) do
+    Delete(c1, 1, 1);
+   if c1='' then
+    break;
+   //Получаем подстроку
+   if Pos(',', c1)<>0 then
+    c2:=copy(c1, 1, Pos(',', c1)-1)
+   else
+    c2:=c1;
+   //Удаляем её из первой
+   Delete(c1, 1, Length(c2));
+   while (Length(c2)>0) and (not (c2[Length(c2)] in ['0'..'9', 'A'..'Z'])) do
+    Delete(c2, Length(c2), 1);
+   if c2=UpString(m) then  //Равны? Возвращаем true
+    Exit;
+  end;
+ MComp:=false;
+end;
+//Сравнение дат
+function DComp(m:TSystemTime;n:String):Boolean;
+begin
+//FIXME: лень реализовывать
+ DComp:=false;
 end;
 //Обработка файла
 procedure ProcessFile;
@@ -684,6 +769,8 @@ var Mime:TextFile;
     j, rcl, mr, mc, t, ac, tofs:Longint;
     ms, mp, SCLen:Boolean;
     md:LongWord;
+    MMode:Byte;
+//    bndr:String;
 const Req='Request to: ';
       clst='Content-Length: ';
       acrc='Accept-Ranges: ';
@@ -693,13 +780,14 @@ const Req='Request to: ';
       pu='Public: ';
       bndr='VPSERVERBNDR';
       nl=#13#10;
-procedure AddMHead(main:Boolean);
+procedure AddMHead;
 var x:LongWord;
 begin
  for x:=1 to md do
-  Resp:=Resp+MGetHLine(hmod, x, main)+nl;
+  Resp:=Resp+MGetHLine(hmod, x)+nl;
 end;
 begin
+ //Если ошибка, то не используем Range
  if Err then
   begin
    DeleteList;
@@ -709,10 +797,15 @@ begin
  if ppath[Length(ppath)]='\' then
   ppath:=ppath+'index.html';
  PAcc:=false;
- mp:=false;
  md:=0;
  if NPlugInst and (not Err) then
-  PAcc:=MQueryProc(hmod, PartOP, OptOP, KAlive, PostOP, PChar(ppath));
+  begin  //Запрос плагина
+   MMode:=MQueryProc(hmod, PartOP, OptOP, KAlive, PostOP, PChar(ppath));
+   if (MMode and 1)<>0 then
+    PAcc:=true;
+  end
+ else
+  MMode:=0;
  if (ppath[1]<>#13) and (not PAcc) then //Проверяем на спец-символ
   begin
    Assign(ThreadFl[i], ppath);
@@ -730,8 +823,8 @@ begin
        if Err then
         ppath:=#13     //Не нашли error404.html. Юзаем спец-символ
        else
-        begin
-         LogMsg(llAll, i, Req+ppath); //Сообщаем, что был запрос на такой-то файл
+        begin  
+         LogMsg(llAll, i, Req+ppath);
          ppath:=val+'\error404.html'; //А сами ищем error404.html
         end;
        Err:=true;      //Была ошибка
@@ -742,13 +835,65 @@ begin
   end;
  SCLen:=true;
  if PAcc then
-  begin
+  begin  //Обновление параметров
    StrToBuf(resph);
-   md:=MUpdateParamsProc(hmod, PartOP, OptOP, KAlive, SCLen, PChar(@rbuf));
+   MUpdateParamsProc(hmod, PartOP, OptOP, KAlive, SCLen, PChar(@rbuf));
    BufToStr(resph);
+  end;
+ //Файл найден?
+ if (ppath[1]<>#13) and (not Err) and (not PAcc) then
+  begin
+   fetag.DateTime:=FileLastWriteDate(ppath);
+   fetag.Size:=FileSize(ThreadFl[i]);
+   ac:=0;
+   //Учитываем If-*Macth и If-*Modified-Since
+   if cond1.isInst then
+    if cond1.isTrue then
+     if not MComp(GetMD5(fetag, sizeof(fetag)), cond1.val) then
+      ac:=2
+     else
+    else
+     if MComp(GetMD5(fetag, sizeof(fetag)), cond1.val) then
+      if IsBas then
+       ac:=1
+      else
+       ac:=2
+     else
+      cond2.isInst:=false;
+   if cond2.isInst then
+    if cond2.isTrue then
+     if not DComp(fetag.DateTime, cond2.val) then
+      ac:=1
+    else
+     if DComp(fetag.DateTime, cond2.val) then
+      ac:=2;
+   if ac<>0 then
+    begin //Ошибка
+     DeleteList;
+     Close(ThreadFl[i]); 
+     OptOP:=false;
+    end;
+   LogMsg(llAll, i, Req+ppath);
+   IncET:=not OptOP; //Вставлять Entity Tags
+   if ac=2 then
+    begin  //412
+     resph:='412 Precondition Failed';
+     Err:=true;
+     ppath:=val+'\error412.html';
+     ProcessFile;
+     Exit;
+    end;
+   if ac=1 then
+    begin //304    
+     resph:='304 Not Modified';
+     ppath:=#13;
+     OptOP:=false;
+    end;
   end;
  ac:=0;
  tofs:=-1;
+ mp:=false;
+ //Получаем размер
  if PAcc then
   PartOP:=MSetPosProc(hmod, tofs)
  else
@@ -776,19 +921,18 @@ begin
      if (curr^.StartR>curr^.EndR) or (curr^.StartR<0) then
       PartOP:=false;                       //Некорректные данные
      curr:=curr^.Next;
-     mp:=mp or (curr<>nil);
+     mp:=mp or (curr<>nil);  //Несколько промежутков?
      inc(ac);
     end;
   end;
- if ((not PartOP) or (ppath[1]=#13)) and (contr<>nil) then       //Ошибка
-  begin
+ if ((not PartOP) or (ppath[1]=#13)) and (contr<>nil) then
+  begin //Некорректные промежутки
    if ppath[1]<>#13 then
-    begin
-     LogMsg(llAll, i, Req+ppath);
-     Close(ThreadFl[i]);
-    end;
+    Close(ThreadFl[i]);
    resph:='416 Requested Range Not Satisfiable';
    Err:=true;
+   OptOP:=false;
+   IncET:=false;
    ppath:=val+'\error416.html';
    ProcessFile;
    Exit;
@@ -801,25 +945,26 @@ begin
    if ppath[1]=#13 then   //Ошибок не было, а содержимое есть?
     resph:='204 No Content' //Установлен спец-символ - ничего не отправлять
    else
-    begin
-     if PartOP then //Используется Content-Range?
-      resph:='206 Partial Content' //Да
-     else
-      resph:='200 OK'; //Просто файл
-     LogMsg(llAll, i, Req+ppath); //Был запрос на такой-то файл
-    end;
+    if PartOP then //Используется Content-Range?
+     resph:='206 Partial Content' //Да
+    else
+     resph:='200 OK'; //Просто файл
  //Формируем ответ
- Resp:=HttpV+' '+resph; //HTTP/1.X XXX XXXXXXX
+ Resp:='HTTP/1.1 '+resph; //HTTP/1.X XXX XXXXXXX
  LogMsg(llNotice, i, 'Response: '+Resp); //Мы отвечаем вот это
  Resp:=Resp+nl+'Date: '+GetFormatedTime+nl+'Server: '+SERV+nl; //Информация о сервере (ID и дата)
+ if (MMode and 4)<>0 then
+  begin //Вставляем дополнительные заголвоки
+   md:=MGetHAm(2);
+   AddMHead;
+  end;
  rcont:='';
- if OptOP then
+ if OptOP then //Собщить о том, что поддерживает сервер?
   begin
-   //Собщить о том, что поддерживает сервер?
    alc:='GET, POST, HEAD, OPTIONS';
    puc:=alc+', PUT, PATCH, DELETE, LINK, UNLINK';
-   if PAcc then
-    begin
+   if NPlugInst then
+    begin //Обновляем список
      StrToBuf(alc);
      MGetSMeth(hmod, 1, PChar(@rbuf));
      BufToStr(alc);
@@ -830,17 +975,19 @@ begin
    Resp:=Resp+al+alc+nl+pu+puc+nl;
    OptOP:=not Err;
   end;
+ if IncET then //Вставляем Entity Tags
+  Resp:=Resp+'ETag: '+GetMD5(fetag, sizeof(fetag))+nl+'Last-Modified: '+FormatSysTime(fetag.DateTime)+nl;
  if (ppath[1]<>#13) or PAcc then
   begin
    //Отправляем файл
    r:='';
    rcl:=tofs+1; //Размер содержимого
    if not Err then
-    if not PAcc then
-     begin //Сообщаем данные о файле и факт возможности использования Range
-      Resp:=Resp+'Last-Modified: '+FormatSysTime(FileLastWriteDate(ppath))+nl;
-      Resp:=Resp+acrc+'bytes'+nl;
-     end
+    if not (PAcc or OptOP) then
+//     begin //Сообщаем данные о файле и факт возможности использования Range
+//      bndr:=GetMD5(i);
+      Resp:=Resp+acrc+'bytes'+nl//;
+//     end
     else
    else //Использовать Range нельзя
     Resp:=Resp+acrc+'none'+nl;
@@ -861,8 +1008,8 @@ begin
       inc(ac);
      end;
    if OptOP then
-    rcl:=0;
-   if not PAcc then
+    rcl:=0; //Не отправлять тело для OPTIONS
+   if not (PAcc or OptOP) then
     begin
      //Получаем расширение (всё до последней точки)
      for j:=Length(ppath) downto 1 do
@@ -891,7 +1038,7 @@ begin
       end;
     end;
    if (not mp) and SCLen then
-    begin
+    begin //Отправлить длину (и Content-Type)
      Resp:=Resp+clst+IntToStr(rcl)+nl;
      if rcont<>'' then //Нашли - отправляем
       Resp:=Resp+cnt+rcont+nl;
@@ -900,9 +1047,12 @@ begin
  else
   if Err then
    Resp:=Resp+clst+'0'+nl; //Если есть спец-символ, то длина = 0
+ if PAcc or ((MMode and 2)<>0) then
+  md:=MGetHAm(ord(mp));
  if mp then
-  begin
+  begin  //Несколько промежутков
    Resp:=Resp+cnt+'multipart/byteranges; boundary='+bndr+nl;
+   //Изменяем список
    curr:=nil;
    repeat
     new(lr);
@@ -922,10 +1072,16 @@ begin
       curr:=lr^.Next;
      end;
    until curr^.Next=nil;
+   new(lr);
+   lr^.StartR:=-2;
+   lr^.EndR:=-2;
+   lr^.Next:=nil;
+   curr^.Next:=lr;
+   inc(ac);
   end
  else
   if PAcc then
-   AddMHead(true);
+   AddMHead; //Добавляем дополнительные заголовки
  if KAlive then
   cont:='Keep-Alive'
  else
@@ -934,7 +1090,7 @@ begin
  //Отправляем ответ
  LogMsg(llAll, i, 'Sending response...');
  o:=0;
- if HeadOP or (OptOP and (not Err)) then //Не отправлять тело для HEAD и OPTIONS
+ if HeadOP or OptOP then //Не отправлять тело для HEAD и OPTIONS
   ac:=0;
  New(curr);          //Создаём данные для отправки заголовка
  curr^.Next:=contr;
@@ -945,14 +1101,19 @@ begin
  Err:=false;
  while ac>0 do
   begin //Отправляем по частям
-   ms:=(curr^.StartR=-1) and (curr^.EndR<0);
-   if (curr^.EndR=-2) then
+   ms:=(curr^.StartR<0) and (curr^.EndR<0);
+   if curr^.EndR=-2 then
     begin
-     Resp:='--'+bndr+nl+crb+IntToStr(curr^.Next^.StartR)+'-'+IntToStr(curr^.Next^.EndR)+'/'+IntToStr(tofs+1)+nl;
-     if rcont<>'' then
-      Resp:=Resp+cnt+rcont+nl;
-     if PAcc then
-      AddMHead(false);
+     if curr^.StartR=-1 then
+      begin //Заголовки промежутка
+       Resp:='--'+bndr+nl+crb+IntToStr(curr^.Next^.StartR)+'-'+IntToStr(curr^.Next^.EndR)+'/'+IntToStr(tofs+1)+nl;
+       if rcont<>'' then
+        Resp:=Resp+cnt+rcont+nl;
+       if PAcc then
+        AddMHead; //Дополнительные заголовки
+      end
+     else
+      Resp:='--'+bndr+'--'+nl;
      Resp:=Resp+nl;
     end;
    dec(ac);
@@ -1042,7 +1203,7 @@ var p:Pointer;
     ps, tr:Longint;
 begin
  if NPlugInst and (copy(ppath, 1, 1)<>#13) then
-  begin        
+  begin  //Отправляем GET
    StrToBuf(ppath);
    MLoadGetProc(hmod, PChar(@rbuf));
    BufToStr(ppath);
@@ -1051,8 +1212,10 @@ begin
   ppath:=copy(ppath, 1, Pos('?', ppath)-1); //Нам GET-параметры не нужны
  if Pos('#', ppath)<>0 then
   ppath:=copy(ppath, 1, Pos('#', ppath)-1); //Это в принципе не может быть, но бережённого Бог бережёт
- ReformStr(ppath); //BUG ALL VPSERVER - поддержка %xy
+ ReformStr(ppath);
  IsHost:=false;
+ cond1.isInst:=false;
+ cond2.isInst:=false;
  if Pos('://', ppath)<>0 then //Поддержка абсолютного URL
   begin
    LogMsg(llNotice, i, 'Warning! Absolute URL!');
@@ -1074,9 +1237,9 @@ begin
    FormNextStr; //Получаем следующую строку
    if r='' then
     break;      //EOF
-   hn:=copy(r, 1, Pos(':', r)-1); //Название
+   hn:=UpString(copy(r, 1, Pos(':', r)-1)); //Название
    val:=copy(r, Pos(':', r)+2, Length(r)-Pos(':', r)-1); //Значение
-   ReformStr(val); //BUG ALL VPSERVER - поддержка %xy
+   ReformStr(val);
    if NPlugInst then
     begin     
      StrToBuf(val);
@@ -1085,7 +1248,7 @@ begin
     end
    else
     PAcc:=false;
-   if hn='Host' then
+   if hn='HOST' then
     begin  //Выбираем хост
 h:   if ppath[1]=#13 then
       continue; //Была ошибка
@@ -1099,22 +1262,22 @@ h:   if ppath[1]=#13 then
      SetHost(val); //Установить хост
      continue;
     end;
-   if hn='User-Agent' then
+   if hn='USER-AGENT' then
     begin //Показать кто клиент
-     LogMsg(llAll, i, 'User agent: '+val);
+     LogMsg(llNotice, i, 'User agent: '+val);
      continue;
     end;
-   if hn='Referer' then
+   if hn='REFERER' then
     begin //Показать откуда перешёл
-     LogMsg(llAll, i, 'Referer: '+val);
+     LogMsg(llNotice, i, 'Referer: '+val);
      continue;
     end;
-   if hn='From' then
+   if hn='FROM' then
     begin //Показать e-mail
      LogMsg(llAll, i, 'From: '+val);
      continue;
     end;
-   if hn='Range' then
+   if hn='RANGE' then
     begin //Установить Range
      if copy(val, 1, 6)<>'bytes=' then
       continue; //Кроме bytes мы ничего не поддерживаем
@@ -1199,18 +1362,19 @@ h:   if ppath[1]=#13 then
       PartOP:=true; //Включаем Range
      continue;
     end;
-   if hn='Connection' then
+   if hn='CONNECTION' then
     begin  //Устанавливаем режим подключения
-     if Pos('Keep-Alive', val)=1 then //Есть Keep-Alive
+     val:=UpString(val);
+     if Pos('KEEP-ALIVE', val)=1 then //Есть Keep-Alive
       KAlive:=true
      else
-      if Pos('close', val)=1 then //Есть close
+      if Pos('CLOSE', val)=1 then //Есть close
        KAlive:=false;
-     if (val<>'close') and (val<>'Keep-Alive') then //Неизвесный тип
+     if (val<>'CLOSE') and (val<>'KEEP-ALIVE') then //Неизвесный тип
       LogMsg(llAll, i, 'FIXME: "Connection: '+val+'" Not supported connection mode');
      continue;
     end;
-   if hn='Content-Length' then
+   if hn='CONTENT-LENGTH' then
     begin //Для метода POST
      if PostOP or OptOP or PAcc then  //Метод POST/OPTIONS?
       begin  //Да - устанавливаем длину
@@ -1221,8 +1385,40 @@ h:   if ppath[1]=#13 then
      LogMsg(llNotice, i, 'Warning! Unexpected header! 400 Bad Request for safe end');
      ppath:=#13#10;
     end;
-   if Pos('Accept', hn)=1 then
+   if Pos('ACCEPT', hn)=1 then
     continue; //Игнорируем все Accept-XXXX
+   if Pos('IF', hn)=1 then
+    begin //Поддержка условий
+     if hn='IF-MATCH' then
+      tr:=11
+     else
+      if hn='IF-NONE-MATCH' then
+       tr:=1
+      else
+       if hn='IF-MODIFIED-SINCE' then
+        tr:=12
+       else
+        if hn='IF-UNMODIFIED-SINCE' then
+         tr:=2
+        else
+         tr:=0;
+     //Настройка флагов
+     case (tr mod 10) of
+      1:begin
+         cond1.isInst:=not cond1.isInst;
+         cond1.isTrue:=Boolean(tr div 10);
+         cond1.val:=val;
+        end;
+      2:begin
+         cond2.isInst:=not cond2.isInst;
+         cond2.isTrue:=Boolean(tr div 10);
+         cond2.val:=val;
+        end;
+      else
+       LogMsg(llAll, i, 'FIXME: "'+hn+'" is unsupported condition');
+     end;
+     continue;
+    end;
    //Неизвестный заголовок
    if not PAcc then
     LogMsg(llAll, i, 'FIXME: "'+hn+': '+val+'" Header has been ignored');
@@ -1246,6 +1442,7 @@ f: if GetLastError=0 then //Не было ошибки - превышен лимит ожидания
   begin //Да
    while Pos('/', ppath)<>0 do     //Заменяем / на \
     ppath[Pos('/', ppath)]:='\';
+   DelStr(ppath, '\..\', 3);       //От корня
    DelStr(ppath, '\\', 1);         //Заменяеи \\ на \
    if ppath[1]<>'\' then           //От корня
     ppath:='\'+ppath;
@@ -1253,7 +1450,6 @@ f: if GetLastError=0 then //Не было ошибки - превышен лимит ожидания
    DelStr(ppath, '?', 1);
    while ppath[Length(ppath)]='.' do  //Отчистка '.' Thanks to Genix
     Delete(ppath, Length(ppath), 1);
-   DelStr(ppath, '\..\', 3);       //От корня
   end
  else
   begin //Есть спец-симол
@@ -1292,7 +1488,8 @@ f: if GetLastError=0 then //Не было ошибки - превышен лимит ожидания
   goto f;
  GetDir(0, val); //В val наша Home папка
  if ppath[1]<>#13 then
-  ppath:=val+ppath; //Мы из Home
+  ppath:=val+ppath; //Мы из Home   
+ IncET:=false;
  ProcessFile; //Обработка файла
 end;
 //Обработка запроса
@@ -1352,6 +1549,7 @@ begin
   end
  else
   meth:=copy(r, 1, Pos(' ', r)-1);
+ IsBas:=meth=GetMeth;
  if (HttpV<>'HTTP/0.9') and (HttpV<>'HTTP/1.0') and (HttpV<>'HTTP/1.1') then //Странная версия HTTP
   begin //Сообщаем об этом
    HttpV:='HTTP/1.1';
@@ -1365,6 +1563,7 @@ begin
   begin
    HeadOP:=true;
    meth:=GetMeth;
+   IsBas:=true; //HEAD и GET
   end;
  if meth='POST' then //Метод POST
   begin
@@ -1444,11 +1643,11 @@ begin
     arecv:=0;
     repeat
      KAlive:=false;
-     if PlugInst then
+     if PlugInst then //Загрузка плагина
       NPlugInst:=MInitProc(hmod);
      ProcessRequest; //Обработка запроса
      if NPlugInst then
-      MRelProc(hmod);
+      MRelProc(hmod); //Выгрузка плагина
      UKAlive:=true;
     until not KAlive;
    end;
@@ -1467,7 +1666,7 @@ begin
   Close(ThreadFl[i]); //Мы не закрыли файл?
 {$I+}
   if IOResult=0 then
-   LogMsg(llNotice, i, fhsbc); //И правда не закрыли
+   LogMsg(llAll, i, fhsbc); //И правда не закрыли
   //Нас нет
   LogMsg(llNotice, i, 'Terminating');
   InterlockedDecrement(PInteger(@ThreadBe[i])^);
@@ -1533,7 +1732,7 @@ begin
       continue;
      end;
     //Теперь его нет
-    LogMsg(llNotice, s, 'Thread '+IntToStr(i)+' has been terminated');
+    LogMsg(llAll, s, 'Thread '+IntToStr(i)+' has been terminated');
     InterlockedDecrement(PInteger(@ThreadBe[i])^);
     InterlockedDecrement(ThreadCount);
    end;
@@ -1579,7 +1778,7 @@ begin
    Exit;
   end;
  //Создаём новый поток
- LogMsg(llNotice, s, 'Starting new thread (number '+IntToStr(i)+')');
+ LogMsg(llAll, s, 'Starting new thread (number '+IntToStr(i)+')');
  //Регистрируем его
  new(p);
  p^:=i;
@@ -1700,6 +1899,7 @@ begin
  TerminateAllThreadsLock:=0;
  SetEvent(TerminateAllThreadsLockE);
  TerminateAllThreads(SYS);
+ LogMsg(llError, SYS, 'Server is successfully restored');
 end;
 
 //Получить имя файла по номеру потока
@@ -1728,7 +1928,8 @@ begin
    InterlockedDecrement(LogMsgLock);
   end;
  if not ResetEvent(LogMsgLockE) then
-  Panic;
+  Panic; 
+ //FIXME: Внимание! Гонки!
  LogMsgLockT:=GetCurrentThreadId;
  case from of //Откуда сообщение?
   -1: fromstr:='SYSTEM';
@@ -1738,7 +1939,7 @@ begin
  end;
  if ord(lev)>=ord(fll) then //Выводить в файл
   begin
-   logstr:=' -- '+GetCurDateTime+' '+fromstr+': '+msg;
+   logstr:='['+GetCurDateTime+'] '+fromstr+': '+msg;
    writeln(F, logstr); //Общий лог
    if from>0 then
     writeln(ThreadLog[from], logstr) //Лог потока
@@ -1754,9 +1955,11 @@ begin
     InterlockedDecrement(SHOWCON);
     write(#13+fromstr+': '+msg); //На экран
    end;
+ //Сброс
  LogMsgLockT:=0;
  if not SetEvent(LogMsgLockE) then
   Panic;
+ //BUG - ошибка в компиляторе (оптимизация)
  asm
   push OFFSET LogMsgLock
   call InterlockedDecrement
@@ -1901,12 +2104,16 @@ begin
    i:=StrToInt(rans[5]);
   end;
  fll:=LogLev(i);
- write('Keep-Alive timeout: ');
- readln(rans[6]);
+ repeat
+  write('Keep-Alive timeout: ');
+  readln(rans[6]);
+ until (StrToInt(rans[6])>=0) or (StrToInt(rans[6])=-1);
  KTimeOut:=StrToInt(rans[6]);
  rans[6]:=IntToStr(KTimeOut);
- write('Read timeout: ');
- readln(rans[7]);
+ repeat
+  write('Read timeout: ');
+  readln(rans[7]);
+ until (StrToInt(rans[7])>=0) or (StrToInt(rans[7])=-1);
  BTimeOut:=StrToInt(rans[7]);
  rans[7]:=IntToStr(BTimeOut);
 end;
@@ -1939,10 +2146,10 @@ begin
    else
     writeln;
   end;
- repeat
-  write('Accept? [Y/n] ');
-  readln(flpath);
- until Length(flpath)>0;
+ write('Accept? [Y/n] ');
+ readln(flpath);
+ if flpath='' then
+  flpath:='y';
  if (UpCase(flpath[1])='N') and (Length(flpath)=1) then
   PromptConf //Спрошу
  else
@@ -1995,8 +2202,10 @@ begin
           cll:=LogLev(StrToInt(mt));
        5:if (StrToInt(mt) in [ord(llAll), ord(llNotice), ord(llError)]) then
           fll:=LogLev(StrToInt(mt));
-       6:KTimeOut:=StrToInt(mt);
-       7:BTimeOut:=StrToInt(mt);
+       6:if (StrToInt(mt)>=0) or (StrToInt(mt)=-1) then
+          KTimeOut:=StrToInt(mt);
+       7:if (StrToInt(mt)>=0) or (StrToInt(mt)=-1) then
+          BTimeOut:=StrToInt(mt);
       end;
       mt:='';
       break;
@@ -2146,8 +2355,10 @@ begin
  LogMsg(llError, SYS, 'Level of logging in file is '+IntToStr(ord(fll)));
  LogMsg(llError, SYS, 'Keep-Alive timeout is '+IntToStr(KTimeOut));
  LogMsg(llError, SYS, 'Read timeout is '+IntToStr(BTimeOut));
+ //Обновление процеуры выхода
  LEP:=ExitProc;
  ExitProc:=@WExit;
+ //Количество потоков
  mx:=c;
  if mx=0 then
   inc(mx);
@@ -2258,4 +2469,3 @@ begin
  LogMsg(llError, SYS, 'DoExit command!');
  MyExit(0); //Выход
 end.
-
