@@ -1,0 +1,6 @@
+type
+ TWSAOverlapped=WSAOVERLAPPED;
+ WSABUF=TWSABUF;
+
+const
+ WINSOCK_VERSION=$0202;
