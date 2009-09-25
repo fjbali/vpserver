@@ -8,7 +8,7 @@ const
   'http://'
  );
 
-function FindMime(const URI:String):String;
+function FindMime(const URI:String):String; //Функцию необходимо немного изменить :-)
 var
  ms, s:String;
  Mime:TextFile;
