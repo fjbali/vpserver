@@ -2,13 +2,13 @@
 {                                                       } 
 {       Windows Sockets API v. 2.20 Header File         } 
 {                                                       } 
-{		Prerelease 16.09.96                                 } 
+{       Prerelease 16.09.96                             } 
 {                                                       } 
-{       Base:	  WinSock2.h from Winsock SDK 1.6 BETA    } 
+{       Base:   WinSock2.h from Winsock SDK 1.6 BETA    } 
 {               Delphi 2 RTL Windows32 API Interface    }  
 {                                                       } 
 {       (c) 1996 by Artur Grajek 'AHS'                  } 
-{	email: c51725ag@juggernaut.eti.pg.gda.pl              } 
+{       email: c51725ag@juggernaut.eti.pg.gda.pl        } 
 {                                                       }
 {*******************************************************}
 {$MINENUMSIZE 4} { Force 4 bytes enumeration size}

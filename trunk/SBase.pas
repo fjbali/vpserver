@@ -1,3 +1,16 @@
+//VPSERVER 3.0 - HTTP Server
+//Copyright (C) 2009 Ivanov Viktor
+//
+//This program is free software; you can redistribute it and/or
+//modify it under the terms of the GNU General Public License
+//as published by the Free Software Foundation; either version 2
+//of the License, or (at your option) any later version.
+//
+//This program is distributed in the hope that it will be useful,
+//but WITHOUT ANY WARRANTY; without even the implied warranty of
+//MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//GNU General Public License for more details.
+
 unit SBase;
 
 interface
@@ -26,7 +39,7 @@ procedure ExecuteCommands(var Settings:TSettings);
 
 implementation
 
-uses SUtils, SLog, PipeUtils, WSUtils, HTTP11, {$IFDEF MSWINDOWS}Windows{$ENDIF};
+uses {$IFDEF MSWINDOWS}Windows{$ENDIF}, SUtils, SLog, PipeUtils, WSUtils, HTTP11;
 
 {Определить режим запуска}
 function LoadMode:TMode;
@@ -419,7 +432,7 @@ begin
  while P<>nil do
   begin
    {Запускаем процесс}
-   if WinExecWithPipe(ParamStr(0)+' '+IntToStr(ord(mServer)), {$IFDEF MSWINDOWS}SW_HIDE{$ELSE}0{$ENDIF}, Pipe, PI)=0 then
+   if WinExecWithPipe(ParamStr(0)+' '+IntToStr(ord(mServer)), {$IFDEF MSWINDOWS}SW_HIDE{$ENDIF}, Pipe, PI)=0 then
     begin
      New(L);
      FillChar(L^, sizeof(L^), 0);
@@ -453,9 +466,6 @@ begin
          Close(L^.PipeOut);
          Close(L^.PipeIn);
         end;
-{$ELSE}
-       PI.Terminate;
-       PI.Destroy;
 {$ENDIF}
        Dispose(L);
       end
@@ -479,22 +489,23 @@ const
  UnkSer='Неизвестный сервер: ';
  CantS='Невозможно запустить сервер ';
  SerIsNot=': сервер не создан';
+ LogServS='Журнал сервера ';
 
 {Команда HELP}
-function HelpFunc(Param:String;var Config:TConfig;var Servers:TServers):LongWord;
+function HelpFunc(const Param:String;var Config:TConfig;var Servers:TServers):LongWord;
 begin
  ConsoleLog('Справка находится в файле README.TXT');
  HelpFunc:=0;
 end;
 
 {Команда START}
-function StartFunc(Param:String;var Config:TConfig;var Servers:TServers):LongWord;
+function StartFunc(const Param:String;var Config:TConfig;var Servers:TServers):LongWord;
 var
  Num:Integer;
  L:PServerData;
  Res:LongWord;
 begin
- StartFunc:=1; 
+ StartFunc:=1;
  if Param='' then
   begin {Нет параметра}
    ConsoleLog(NoEPar);
@@ -561,7 +572,7 @@ begin
 end;
 
 {Команда STOP}
-function StopFunc(Param:String;var Config:TConfig;var Servers:TServers):LongWord;
+function StopFunc(const Param:String;var Config:TConfig;var Servers:TServers):LongWord;
 var
  Num:Integer;
  L:PServerData;
@@ -585,7 +596,7 @@ begin
   begin
    ConsoleLog('Невозможно остановить сервер '+Param+SerIsNot);
    Exit;
-  end;   
+  end;
  if not L^.IsStart then
   begin
    ConsoleLog('Сервер '+Param+' не запущен');
@@ -613,21 +624,129 @@ begin
  StopFunc:=Res;
 end;
 
+{Команда STARTLOG}
+function StartLogFunc(const Param:String;var Config:TConfig;var Servers:TServers):LongWord;
+var
+ Num:Integer;
+ L:PServerData;
+ Res:LongWord;
+ LogPipe:TPipes;
+begin
+{Проверки те же, что и в START}
+ StartLogFunc:=1;
+ if Param='' then
+  begin
+   ConsoleLog(NoEPar);
+   Exit;
+  end;
+ Num:=FindServer(Config.ServerRecords, Param);
+ if Num<0 then
+  begin
+   ConsoleLog(UnkSer+Param);
+   Exit;
+  end;
+ L:=GetServerData(Servers, Num);
+ if L=nil then
+  begin
+   ConsoleLog('Невозможно запустить журнал сервера '+Param+SerIsNot);
+   Exit;
+  end;
+ if L^.IsLogging then
+  begin
+   ConsoleLog('Журнал сервера '+Param+' уже запущен');
+   Exit;
+  end;
+ Res:=CreateEmptyPipe(L^.Params^.LogPipe);
+ if Res=0 then
+  Res:=DuplicatePipe(L^.Params^.LogPipe, LogPipe, L^.PI.hProcess);
+ if Res=0 then
+  begin
+{$I-}
+   writeln(L^.PipeOut, TCommandOrd(cmStartLog));
+   for Res:=1 to sizeof(LogPipe) do
+    writeln(L^.PipeOut, membuf(@LogPipe)^[Res]);
+   readln(L^.PipeIn, Res);
+{$I+}
+   if Res=0 then
+    Res:=IOResult
+   else
+    IOResult;
+  end;
+ if Res<>0 then
+  begin
+   ClosePipe(LogPipe);
+   ClosePipe(L^.Params^.LogPipe);
+   ConsoleLog('Произошла ошибка во время связывания процесса каналом с сервером '+Param);
+  end
+ else
+  ConsoleLog(LogServS+Param+' запущен');
+ StartLogFunc:=Res;
+ L^.IsLogging:=Res=0;
+end;
+
+{Команда STOPLOG}
+function StopLogFunc(const Param:String;var Config:TConfig;var Servers:TServers):LongWord;
+var
+ Num:Integer;
+ L:PServerData;
+ Res:LongWord;
+begin
+{Проверки те же, что и в START}
+ StopLogFunc:=1;
+ if Param='' then
+  begin
+   ConsoleLog(NoEPar);
+   Exit;
+  end;
+ Num:=FindServer(Config.ServerRecords, Param);
+ if Num<0 then
+  begin
+   ConsoleLog(UnkSer+Param);
+   Exit;
+  end;
+ L:=GetServerData(Servers, Num);
+ if L=nil then
+  begin
+   ConsoleLog('Невозможно отсановить журнал сервера '+Param+SerIsNot);
+   Exit;
+  end;
+ if not L^.IsLogging then
+  begin
+   ConsoleLog(LogServS+Param+' не запущен');
+   Exit;
+  end;
+ ClosePipe(L^.Params^.LogPipe);
+{$I-}
+ writeln(L^.PipeOut, TCommandOrd(cmStopLog));
+ readln(L^.PipeIn, Res);
+{$I+}
+ if Res=0 then
+  Res:=IOResult
+ else
+  IOResult;
+ L^.IsLogging:=false;
+ if Res=0 then
+  ConsoleLog(LogServS+Param+' остановлен')
+ else
+  ConsoleLog('Произошла ошибка во время остановки журнала сервера '+Param);
+ StopLogFunc:=Res;
+end;
+
 {-------------------------------End}
 
 {Запустить диалог}
 procedure StartDialogAndWait(var Config:TConfig;var Servers:TServers);
 type
- ComFunc=function(Param:String;var Config:TConfig;var Servers:TServers):LongWord;
+ ComFunc=function(const Param:String;var Config:TConfig;var Servers:TServers):LongWord;
 const
- ACOM=3;
+ ACOM=5;
  {Список команд}
  coms:array[0..ACOM-1] of String=(
-  'HELP', 'START', 'STOP'
+  'HELP', 'START', 'STOP', 'STARTLOG', 'STOPLOG'
  );
  {Список обработчиков}
  comp:array[0..ACOM-1] of ComFunc=(
-  HelpFunc, StartFunc, StopFunc
+  HelpFunc, StartFunc, StopFunc, StartLogFunc, StopLogFunc
  );
 var
  Com, Param:String;
@@ -655,6 +774,7 @@ begin
      break {Выходим}
     else
      Param:=GetInputLine; {Читаем команду}
+   Crop(Param);
    if Param='' then
     continue; {Нет команды}
    {Обрабатываем строку}
@@ -713,9 +833,6 @@ begin
     TerminateProcess(L^.PI.hProcess, INFINITE); {Принудительно}
    CloseHandle(L^.PI.hProcess);
    CloseHandle(L^.PI.hThread);
-{$ELSE}
-   L^.PI.WaitToTerminate;
-   L^.PI.Destroy;
 {$ENDIF}
    Dispose(L);
   end;
@@ -806,8 +923,6 @@ begin
        Result:=PThreadID(@membuf(Tids)^[p+1]);
 {$IFDEF MSWINDOWS}
        i:=WaitForSingleObject(Result^, 0)=WAIT_TIMEOUT;
-{$ELSE}
-       i:=WaitForThreadTerminate(Result^, 0)<>0;
 {$ENDIF}
        if i then
         begin {Поток не завершён}
@@ -945,7 +1060,7 @@ begin
     begin
      {Запускаем серверную часть}
      Settings.hThread:=BeginThread(nil, 0, ServerThread, @Settings, 0, Settings.tid);
-     if Settings.hThread=0 then
+     if Settings.hThread=INVALID_HANDLE_VALUE then
       R:=GetLastError;
     end;
   end;
@@ -975,9 +1090,35 @@ begin
  {Сообщить о результате}
  writeln(R);
 end;
-  
-{-------------------------------End}
 
+procedure cmStartLogProc(var Settings:TSettings);
+var I:LongWord;
+begin
+ if Settings.IsLogging then
+  begin
+   writeln(1);
+   Exit;
+  end;
+ for I:=1 to sizeof(Settings.Params.LogPipe) do
+  readln(membuf(@Settings.Params.LogPipe)^[I]);
+ InstallPipeConnect(Settings.Params.LogPipe, true);
+ Settings.IsLogging:=true;
+ writeln(0);
+end;
+
+procedure cmStopLogProc(var Settings:TSettings);
+begin
+ if not Settings.IsLogging then
+  begin
+   writeln(1);
+   Exit;
+  end;
+ UnInstallPipeConnect(Settings.Params.LogPipe);
+ Settings.IsLogging:=false;
+ writeln(0);
+end;
+
+{-------------------------------End}
 
 {Выполнить команды}
 procedure ExecuteCommands(var Settings:TSettings);
@@ -986,7 +1127,7 @@ type
 const
  {Список обработчиков комманд}
  cmhndrs:array[TCommand] of TServCommProc=(
-  nil, cmStartProc, cmStopProc
+  nil, cmStartProc, cmStopProc, cmStartLogProc, cmStopLogProc
  );
 var
  Com:TCommand;
@@ -1021,6 +1162,8 @@ var
  LastExceptProc:Pointer;
  LastErrorProc:Pointer;
  LastExitProc:Pointer;
+ LCounter:LongWord;
+ LParams:String='';
 
 {Обработчики ошибок}
 
@@ -1028,12 +1171,12 @@ procedure ExceptHandler(ExceptObject:TObject;ExceptAddr:Pointer{$IFDEF FPC};Fram
 begin
 {$I-}
  PauseAllThreads;
- writeln('Произошло необработанное исключение');
- writeln('Адрес: ', LongWord(ExceptAddr));
+ writeln(ErrOutput, 'Произошло необработанное исключение');
+ writeln(ErrOutput, 'Адрес: ', LongWord(ExceptAddr));
 {$IFDEF FPC}
- writeln('Frame count: ', FrameCount);
+ writeln(ErrOutput, 'Frame count: ', FrameCount);
  if Frame<>nil then
-  writeln('Frame: ', LongWord(Frame^));
+  writeln(ErrOutput, 'Frame: ', LongWord(Frame^));
 {$ELSE}
  if Assigned(ExceptObject) then
   ExceptObject.Destroy;
@@ -1046,11 +1189,11 @@ procedure SErrorProc(ErrorCode:{$IFDEF FPC}LongInt{$ELSE}Byte{$ENDIF};Addr:Point
 begin
 {$I-}
  PauseAllThreads;
- writeln('Произошла ошибка в системной библиотеке программы');
- writeln('Адрес: ', LongWord(Addr));
- writeln('Код ошибки: ', ErrorCode);
+ writeln(ErrOutput, 'Произошла ошибка в системной библиотеке программы');
+ writeln(ErrOutput, 'Адрес: ', LongWord(Addr));
+ writeln(ErrOutput, 'Код ошибки: ', ErrorCode);
 {$IFDEF FPC}
- writeln('Frame: ', LongWord(Frame));
+ writeln(ErrOutput, 'Frame: ', LongWord(Frame));
 {$ENDIF}
  ExitCode:=0;
  ErrorAddr:=nil;
@@ -1085,10 +1228,28 @@ initialization
  ErrorProc:=SErrorProc;
  ExitProc:=@SExitProc;
  {Добавляем свою переменную окружения}
- SUtils.SetEnvironmentVariable('VPSERVERdir', ServerDir);
+ SetEnvironmentVariable('VPSERVERdir', ServerDir);
  {Подгоняем под себя STDIO}
  Rewrite(Output);
  Reset(Input);
+ for LCounter:=0 to ParamCount do
+  LParams:=LParams+' '+ParamStr(LCounter);
+ Delete(LParams, 1, 1);
+ for LCounter:=0 to MaxInt do
+  begin
+   Assign(ErrOutput, LogDir+'CrashLog'+IntToStr(LCounter)+LogExt);
+{$I-}
+   Rewrite(ErrOutput);
+{$I+}
+   if IOResult=0 then
+    begin
+     writeln(ErrOutput, 'Executed at ', GetRFC1123DateTime(GetCurrentDateTime));
+     writeln(ErrOutput, 'Command line: ', LParams);
+     writeln(ErrOutput, 'Error output:');
+     break;
+    end;
+  end;
+ AutoFlush(ErrOutput);
  AutoFlush(Output);
  AutoFlush(Input);
 finalization

@@ -1,8 +1,23 @@
+//VPSERVER 3.0 - HTTP Server
+//Copyright (C) 2009 Ivanov Viktor
+//
+//This program is free software; you can redistribute it and/or
+//modify it under the terms of the GNU General Public License
+//as published by the Free Software Foundation; either version 2
+//of the License, or (at your option) any later version.
+//
+//This program is distributed in the hope that it will be useful,
+//but WITHOUT ANY WARRANTY; without even the implied warranty of
+//MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//GNU General Public License for more details.
+
 unit HTTP11;
 
 interface
 
 uses STypes;
+
+{$DEFINE DYNMIME}
 
 procedure ProccessRequest(const Socket:TSocket;const Params:PParams);
 
@@ -36,7 +51,7 @@ var
      while Pos(' ', t1)<>0 do
       begin
        inc(t3);
-       Delete(t1, Pos(' ', t1), 1);
+       t1[Pos(' ', t1)]:='?';
       end;
      if t3<>3 then
       begin
@@ -249,7 +264,7 @@ begin
     end;
    if Response.ToRecv<>0 then
     begin
-     GetMem(p, Response.ToRecv);
+     GetMem(p, Response.ToRecv);    
      RecvBuf(GetFileSockRecord(SockIn)^, p^, Response.ToRecv, TimeOut, Response.ToRecv);
      FreeMem(p);
      if TimeOut then
@@ -264,4 +279,12 @@ begin
  Close(SockOut);
 end;
 
+{$IF DECLARED(MimeInit)}
+initialization
+ MimeInit;
+{$IFEND}
+{$IF DECLARED(MimeDestroy)}
+finalization
+ MimeDestroy;
+{$IFEND}
 end.

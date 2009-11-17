@@ -1,8 +1,21 @@
+//VPSERVER 3.0 - HTTP Server
+//Copyright (C) 2009 Ivanov Viktor
+//
+//This program is free software; you can redistribute it and/or
+//modify it under the terms of the GNU General Public License
+//as published by the Free Software Foundation; either version 2
+//of the License, or (at your option) any later version.
+//
+//This program is distributed in the hope that it will be useful,
+//but WITHOUT ANY WARRANTY; without even the implied warranty of
+//MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//GNU General Public License for more details.
+
 unit PipeUtils;
 
 interface
 
-uses {$IFDEF MSWINDOWS}Windows{$ELSE}Process, Pipes{$ENDIF}, STypes;
+uses {$IFDEF MSWINDOWS}Windows{$ENDIF}, STypes;
 
 {$IFDEF MSWINDOWS}
 function CreateProcessWithPipe(const lpApplicationName:PChar;const lpCommandLine:PChar;const dwCreationFlags:LongWord;
@@ -10,6 +23,8 @@ function CreateProcessWithPipe(const lpApplicationName:PChar;const lpCommandLine
  out Pipe:TPipes):LongWord;
 {$ENDIF}
 function WinExecWithPipe(const CmdLine:String;const Show:Word;out Pipe:TPipes;out PI:TProcessInformation):LongWord;
+function CreateEmptyPipe(out Pipe:TPipes):LongWord;
+function DuplicatePipe(const InPipe:TPipes;out OutPipe:TPipes;const Proc:THandle):LongWord;
 function OpenPipe(var Inp, Outp:TextFile;const Pipe:TPipes):Integer;
 procedure ClosePipe(var Pipe:TPipes);
 
@@ -64,7 +79,7 @@ begin
   begin
    state:=CloseHandle(F.Handle);
    state:=CloseHandle(PHandle(@F.UserData)^) and state;
-  end;        
+  end;
  FreeMem(F.BufPtr);
  F.Mode:=fmClosed;
  if state then
@@ -139,47 +154,31 @@ function CreateProcessWithPipe(const lpApplicationName:PChar;const lpCommandLine
  out Pipe:TPipes):LongWord;
 var
  SI:TStartupInfo;
- SA:TSecurityAttributes;
  OK:Boolean;
 begin
  FillChar(PI, sizeof(PI), 0);
- with SA do
+ Result:=CreateEmptyPipe(Pipe);
+ if Result<>0 then
+  Exit;
+ SI:=StIn;
+ with SI, Pipe do
   begin
-   nLength:=sizeof(SA);
-   bInheritHandle:=true;
-   lpSecurityDescriptor:=nil;
+   hStdInput:=stdinp_r;
+   hStdOutput:=stdout_w;
+   hStdError:=stdout_w;
+   dwFlags:=dwFlags or STARTF_USESTDHANDLES;
   end;
- FillChar(Pipe, sizeof(Pipe), 0);
- with Pipe, SI do
+ OK:=CreateProcess(lpApplicationName, lpCommandLine, nil, nil, true, dwCreationFlags, lpEnvironment, lpCurrentDirectory, SI, PI);
+ if OK and (WaitForInputIdle(PI.hProcess, 0)=WAIT_TIMEOUT) then
   begin
-   OK:=CreatePipe(stdinp_r, stdinp_w, @SA, 0);
-   if OK then
-    OK:=CreatePipe(stdout_r, stdout_w, @SA, 0);
-   if OK then
-    begin
-     SI:=StIn;
-     hStdInput:=stdinp_r;
-     hStdOutput:=stdout_w;
-     hStdOutput:=stdout_w;
-     dwFlags:=dwFlags or STARTF_USESTDHANDLES;
-     OK:=CreateProcess(lpApplicationName, lpCommandLine, @SA, @SA, true, dwCreationFlags, lpEnvironment, lpCurrentDirectory, SI, PI);
-    end;
-   if WaitForInputIdle(PI.hProcess, 0)=WAIT_TIMEOUT then
-    begin
-     TerminateProcess(PI.hProcess, 0);
-     OK:=false;
-     SetLastError(ERROR_INVALID_PARAMETER);
-    end;
-   if not OK then
-    begin
-     CreateProcessWithPipe:=GetLastError;
-     CloseHandle(stdinp_r);
-     CloseHandle(stdinp_w);
-     CloseHandle(stdout_r);
-     CloseHandle(stdout_w);
-    end
-   else
-    CreateProcessWithPipe:=0;
+   TerminateProcess(PI.hProcess, 0);
+   OK:=false;
+   SetLastError(ERROR_INVALID_PARAMETER);
+  end;
+ if not OK then
+  begin            
+   Result:=GetLastError;
+   ClosePipe(Pipe);
   end;
 end;
 
@@ -195,34 +194,56 @@ begin
  WinExecWithPipe:=CreateProcessWithPipe(nil, PChar(CmdLine), CREATE_NEW_CONSOLE, nil, nil, SI, PI, Pipe);
 end;
 
-procedure ClosePipe(var Pipe:TPipes);
+function CreateEmptyPipe(out Pipe:TPipes):LongWord;
+var OK:Boolean;
+    SA:TSecurityAttributes;
 begin
- CloseHandle(Pipe.stdinp_r);
- CloseHandle(Pipe.stdinp_w);
- CloseHandle(Pipe.stdout_w);
- CloseHandle(Pipe.stdout_r);
+ FillChar(SA, sizeof(SA), 0);
+ with SA do
+  begin
+   nLength:=sizeof(SA);
+   bInheritHandle:=true;
+   lpSecurityDescriptor:=nil;
+  end;
+ FillChar(Pipe, sizeof(Pipe), 0);
+ with Pipe do
+  begin
+   OK:=CreatePipe(stdinp_r, stdinp_w, @SA, 0);
+   if OK then
+    OK:=CreatePipe(stdout_r, stdout_w, @SA, 0);
+  end;
+ if not OK then
+  CreateEmptyPipe:=GetLastError
+ else
+  CreateEmptyPipe:=0;
 end;
 
-{$ELSE}
-function WinExecWithPipe(const CmdLine:String;const Show:Word;out Pipe:TPipes;out PI:TProcessInformation):LongWord;
+function DuplicatePipe(const InPipe:TPipes;out OutPipe:TPipes;const Proc:THandle):LongWord;
+var OK:Boolean;
 begin
- PI:=TProcess.Create(nil);
- PI.Options:=[poUsePipes, poStderrToOutPut];
- PI.CommandLine:=CmdLine;
- try
-  PI.Execute;
-  Pipe.OutP:=PI.Output;
-  Pipe.InP:=PI.Input;
-  Result:=0;
- except on EProcess
-  Result:=INFINITE;
- end;
+ OK:=DuplicateHandle(GetCurrentProcess, InPipe.stdinp_r, Proc, @OutPipe.stdinp_r, 0, true, DUPLICATE_SAME_ACCESS);
+ if OK then
+  OK:=DuplicateHandle(GetCurrentProcess, InPipe.stdinp_w, Proc, @OutPipe.stdinp_w, 0, true, DUPLICATE_SAME_ACCESS);
+ if OK then
+  OK:=DuplicateHandle(GetCurrentProcess, InPipe.stdout_r, Proc, @OutPipe.stdout_r, 0, true, DUPLICATE_SAME_ACCESS);
+ if OK then
+  OK:=DuplicateHandle(GetCurrentProcess, InPipe.stdout_w, Proc, @OutPipe.stdout_w, 0, true, DUPLICATE_SAME_ACCESS);
+ if OK then
+  DuplicatePipe:=0
+ else
+  DuplicatePipe:=GetLastError;
 end;
 
 procedure ClosePipe(var Pipe:TPipes);
 begin
- Pipe.OutP.Destroy;
- Pipe.InP.Destroy;
+ if Pipe.stdinp_r<>INVALID_HANDLE_VALUE then
+  CloseHandle(Pipe.stdinp_r);
+ if Pipe.stdinp_w<>INVALID_HANDLE_VALUE then
+  CloseHandle(Pipe.stdinp_w);
+ if Pipe.stdout_w<>INVALID_HANDLE_VALUE then
+  CloseHandle(Pipe.stdout_w);
+ if Pipe.stdout_r<>INVALID_HANDLE_VALUE then
+  CloseHandle(Pipe.stdout_r);
 end;
 {$ENDIF}
 
