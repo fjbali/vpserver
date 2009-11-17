@@ -1,3 +1,16 @@
+//VPSERVER 3.0 - HTTP Server
+//Copyright (C) 2009 Ivanov Viktor
+//
+//This program is free software; you can redistribute it and/or
+//modify it under the terms of the GNU General Public License
+//as published by the Free Software Foundation; either version 2
+//of the License, or (at your option) any later version.
+//
+//This program is distributed in the hope that it will be useful,
+//but WITHOUT ANY WARRANTY; without even the implied warranty of
+//MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//GNU General Public License for more details.
+
 const
  AVER=2;
  Versions:array[0..AVER-1] of String=(
@@ -8,30 +21,28 @@ const
   'http://'
  );
 
-function FindMime(const URI:String):String; //Функцию необходимо немного изменить :-)
+{$IFDEF DYNMIME}
+{$I Dynmime.inc}
+{$ELSE}
+function FindMime(const URI:String):String;
 var
  ms, s:String;
  Mime:TextFile;
 begin
- s:=URI; 
- Result:='';
+ s:=URI;
+ Result:=DefMime;
 {$IFDEF MSWINDOWS}
  while Pos('\', s)<>0 do
   Delete(s, 1, Pos('\', s));
-{$ELSE}
- while Pos('/', s)<>0 do
-  Delete(s, 1, Pos('/', s));
+ Crop(s);
 {$ENDIF}
  if Pos('.', s)=0 then
-  ms:='txt'
- else
+  Exit;
+ ms:='';
+ while s[Length(s)]<>'.' do
   begin
-   ms:='';
-   while s[Length(s)]<>'.' do
-    begin
-     ms:=s[Length(s)]+ms;
-     SetLength(s, Length(s)-1);
-    end;
+   ms:=s[Length(s)]+ms;
+   SetLength(s, Length(s)-1);
   end;
  s:=ms;
  Crop(s);
@@ -40,21 +51,21 @@ begin
  FileMode:=0;
  Reset(Mime);
  {$I+}
- if IOResult=0 then
+ if IOResult<>0 then
+  Exit;
+ while not Eof(Mime) do
   begin
-   while not Eof(Mime) do
+   readln(Mime, ms);
+   if copy(ms, 1, Pos(' ', ms)-1)=s then
     begin
-     readln(Mime, ms);
-     if copy(ms, 1, Pos(' ', ms)-1)=s then
-      begin
-       Delete(ms, 1, Pos(' ', ms));
-       Result:=ms;
-       break;
-      end;
+     Delete(ms, 1, Pos(' ', ms));
+     Result:=ms;
+     break;
     end;
-   Close(Mime);
   end;
+ Close(Mime);
 end;
+{$ENDIF}
 
 function FormRange(const Range:TBodyRange):String;
 begin
@@ -157,12 +168,12 @@ end;
 
 {Date Header}
 
-function DateHM(Header:String;var Data:Pointer):Boolean;
+function DateHM(const Header:String;out Data:Pointer):Boolean;
 begin
  DateHM:=false;
 end;
 
-function DateHA(var Data:Pointer;var Response:THTTPResponse):Boolean;
+function DateHA(out Data:Pointer;var Response:THTTPResponse):Boolean;
 begin
  DateHA:=true;
 end;
@@ -178,7 +189,7 @@ end;
 
 {Host Header}
 
-function HostHM(Header:String;var Data:Pointer):Boolean;
+function HostHM(const Header:String;out Data:Pointer):Boolean;
 begin
  HostHM:=false;
  if copy(Header, 1, 6)<>'Host: ' then
@@ -202,7 +213,7 @@ end;
 
 {Range Header}
 
-function RangeHM(Header:String;var Data:Pointer):Boolean;
+function RangeHM(const Header:String;out Data:Pointer):Boolean;
 begin
  RangeHM:=false;
  if copy(Header, 1, 7)<>'Range: ' then
@@ -289,7 +300,7 @@ end;
 
 {Server Header}
 
-function ServerHA(var Data:Pointer;var Response:THTTPResponse):Boolean;
+function ServerHA(out Data:Pointer;var Response:THTTPResponse):Boolean;
 begin
  ServerHA:=true;
 end;
@@ -352,7 +363,7 @@ begin
  Dispose(PSingleRangeData(Data));
 end;
 
-function AcceptRangesHA(var Data:Pointer;var Response:THTTPResponse):Boolean;
+function AcceptRangesHA(out Data:Pointer;var Response:THTTPResponse):Boolean;
 var Err, m:Boolean;
     P:PBodyRange;
     D:PPartialContentData;
@@ -461,16 +472,18 @@ end;
 const
  ContentLengthH='Content-Length: ';
 
-function ContentLengthHM(Header:String;var Data:Pointer):Boolean;
+function ContentLengthHM(const Header:String;out Data:Pointer):Boolean;
 var L:PLongInt;
+    T:String;
 begin
  Result:=copy(Header, 1, Length(ContentLengthH))=ContentLengthH;
  if Result then
   begin
-   Delete(Header, 1, Length(ContentLengthH));
-   Crop(Header);
+   T:=Header;
+   Delete(T, 1, Length(ContentLengthH));
+   Crop(T);
    New(L);
-   L^:=StrToInt(Header);
+   L^:=StrToInt(T);
    if L^<0 then
     begin
      Result:=false;
@@ -481,7 +494,7 @@ begin
   end;
 end;
 
-function ContentLengthHA(var Data:Pointer;var Response:THTTPResponse):Boolean;
+function ContentLengthHA(out Data:Pointer;var Response:THTTPResponse):Boolean;
 var
  PL:PLongInt;
  L:LongInt;
@@ -517,12 +530,12 @@ end;
 const
  ContentRangeH='Content-Range: ';
 
-function ContentRangeHM(Header:String;var Data:Pointer):Boolean;
+function ContentRangeHM(const Header:String;out Data:Pointer):Boolean;
 begin
  Result:=false;
 end;
 
-function ContentRangeHA(var Data:Pointer;var Response:THTTPResponse):Boolean;
+function ContentRangeHA(out Data:Pointer;var Response:THTTPResponse):Boolean;
 begin
  Result:=Response.BodyRange<>nil;
  if Result then
@@ -554,25 +567,27 @@ end;
 const
  ContentTypeH='Content-Type: ';
 
-function ContentTypeHM(Header:String;var Data:Pointer):Boolean;
+function ContentTypeHM(const Header:String;out Data:Pointer):Boolean;
+var T:String;
 begin
  Result:=copy(Header, 1, Length(ContentTypeH))=ContentTypeH;
  if Result then
   begin
-   Delete(Header, 1, Length(ContentLengthH));
-   Crop(Header);
+   T:=Header;
+   Delete(T, 1, Length(ContentLengthH));
+   Crop(T);
    New(PString(Data));
-   PString(Data)^:=Header;
+   PString(Data)^:=T;
   end;
 end;
 
-function ContentTypeHA(var Data:Pointer;var Response:THTTPResponse):Boolean;
+function ContentTypeHA(out Data:Pointer;var Response:THTTPResponse):Boolean;
 begin
  Result:=true;
  if (Response.Body.Content='') and (Response.URI<>'') then
   Response.Body.Content:=FindMime(Response.URI);
  if Response.Body.Content='' then
-  Response.Body.Content:='text/plain';
+  Response.Body.Content:=DefMime;
  New(PString(Data));
  PString(Data)^:=Response.Body.Content;
 end;
@@ -599,19 +614,21 @@ const
  ConnectionH='Connection: ';
  KeepAliveV='Keep-Alive';
 
-function ConnectionHM(Header:String;var Data:Pointer):Boolean;
+function ConnectionHM(const Header:String;out Data:Pointer):Boolean;
+var T:String;
 begin
  Result:=copy(Header, 1, Length(ConnectionH))=ConnectionH;
  if Result then
   begin
-   Delete(Header, 1, Length(ConnectionH));
-   Crop(Header);
+   T:=Header;
+   Delete(T, 1, Length(ConnectionH));
+   Crop(T);
    New(PBoolean(Data));
-   PBoolean(Data)^:=(copy(Header, Length(Header)-Length(KeepAliveV)+1, Length(KeepAliveV))=KeepAliveV) or (Pos(KeepAliveV+',', Header)<>0);
+   PBoolean(Data)^:=(copy(T, Length(T)-Length(KeepAliveV)+1, Length(KeepAliveV))=KeepAliveV) or (Pos(KeepAliveV+',', T)<>0);
   end;
 end;
 
-function ConnectionHA(var Data:Pointer;var Response:THTTPResponse):Boolean;
+function ConnectionHA(out Data:Pointer;var Response:THTTPResponse):Boolean;
 begin
  Result:=true;
  New(PBoolean(Data));
@@ -692,12 +709,12 @@ begin
         str:=str+OriginalBody.Content
        else
         if URI='' then
-         str:=str+'text/plain'
+         str:=str+DefMime
         else
          str:=str+FindMime(URI);
        str:=str+#13#10+ContentRangeH+FormRange(BodyRange^)+#13#10#13#10;
        Result.Size:=Length(str);
-       GetMem(Result.Buf, Result.Size);
+       GetMem(Result.Buf, Result.Size);     
        move(PChar(str)^, Result.Buf^, Result.Size);
        inc(State);
       end;
@@ -721,7 +738,7 @@ begin
          if Result.Size<>0 then
           begin
            FreeMem(Result.Buf);
-           Result.Size:=0;
+           FillChar(Result, sizeof(Result), 0);
           end;
          Exit;
         end

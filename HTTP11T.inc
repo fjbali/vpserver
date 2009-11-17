@@ -1,3 +1,16 @@
+//VPSERVER 3.0 - HTTP Server
+//Copyright (C) 2009 Ivanov Viktor
+//
+//This program is free software; you can redistribute it and/or
+//modify it under the terms of the GNU General Public License
+//as published by the Free Software Foundation; either version 2
+//of the License, or (at your option) any later version.
+//
+//This program is distributed in the hope that it will be useful,
+//but WITHOUT ANY WARRANTY; without even the implied warranty of
+//MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//GNU General Public License for more details.
+
 type
  PHeader=^THeader;
  THeader=record
@@ -58,11 +71,14 @@ type
  end;
  TMethodProcess=procedure(var Request:THTTPRequest;var Response:THTTPResponse);
  THeaderType=(htOther,  htGeneral, htRequest, htResponse, htEntity);
- THeaderMatch=function(Header:String;var Data:Pointer):Boolean;
- THeaderAdd=function(var Data:Pointer;var Response:THTTPResponse):Boolean;
+ THeaderMatch=function(const Header:String;out Data:Pointer):Boolean;
+ THeaderAdd=function(out Data:Pointer;var Response:THTTPResponse):Boolean;
  THeaderDelete=procedure(var Data:Pointer);
  THeaderProcess=procedure(var Data:Pointer;var Response:THTTPResponse);
  THeaderPrint=procedure(var F:TextFile;var Data:Pointer);
+
+const
+ DefMime='text/plain';
 
 procedure AddHeader(var Headers:THeaders;const Header:THeader);
 var
@@ -193,7 +209,7 @@ begin
    GetMem(Result.Buf, Result.Size);
    move(P^, Result.Buf^, Result.Size);
   end;
- FreeMeM(P);
+ FreeMem(P);
 end;
 
 procedure ExtBodyDynFree(var Data:Pointer);
@@ -234,24 +250,34 @@ type
  TFileBodyDynData=record
   F:^File;
   p:LongWord;
+  FS:LongWord;
  end;
 
 function FileBodyDynFunct(var Data:Pointer;const S:LongWord=BufS):TEntityBodyStat;
 var
  D:LongWord;
+ M:Pointer;
 begin
  FillChar(Result, sizeof(Result), 0);
  with PFileBodyDynData(Data)^ do
   begin
-   if LongWord(FileSize(F^))<=(S+p) then
-    Result.Size:=LongWord(FileSize(F^))-p
+   if FS<=(S+p) then
+    D:=FS-p
    else
-    Result.Size:=S;
-   if Result.Size=0 then
+    D:=S;
+   if D=0 then
     Exit;
-   GetMem(Result.Buf, Result.Size);
-   BlockRead(F^, Result.Buf^, Result.Size, D);
-   Result.Size:=D;
+   GetMem(M, D);
+{$I-}
+   BlockRead(F^, M^, D, D);
+{$I+}
+   if IOResult=0 then
+    begin
+     GetMem(Result.Buf, D);
+     move(M^, Result.Buf^, D);
+     Result.Size:=D;
+    end;
+   FreeMem(M);
    inc(p, D);
   end;
 end;
@@ -260,6 +286,7 @@ function FileBodyDynSeek(var Data:Pointer;const SeekVal:LongWord):Boolean;
 begin
 {$I-}
  Seek(PFileBodyDynData(Data)^.F^, SeekVal);
+ PFileBodyDynData(Data)^.p:=SeekVal;
 {$I+}
  FileBodyDynSeek:=IOResult=0;
 end;
@@ -290,6 +317,7 @@ begin
    DynSeek:=FileBodyDynSeek;
    DynFree:=FileBodyDynFree;
    FullSize:=FileSize(File(F^));
+   D^.FS:=FullSize;
   end;
 end;
 
@@ -315,13 +343,13 @@ begin
   end;
 end;
 
-procedure SetStatusCode(var Code:TStatusCode;StatusCode:Word;Description:String='');
+procedure SetStatusCode(var Code:TStatusCode;const StatusCode:Word;const Description:String='');
 begin
  Code.StatusCode:=StatusCode;
  Code.Description:=Description;
 end;
 
-procedure SetResponseError(var Response:THTTPResponse;Error:Word;Description:String='');
+procedure SetResponseError(var Response:THTTPResponse;const Error:Word;const Description:String='');
 begin
  FreeEntityBody(Response.Body);
  SetStatusCode(Response.StatusCode, Error, Description);

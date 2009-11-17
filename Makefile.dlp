@@ -43,6 +43,7 @@ SUtils.pas
 =1
 STypes.pas
 WinSock2.pas
+Config.inc
 =1
 =1
 SUtils.pas
@@ -77,6 +78,10 @@ HTTP11T.inc
 =1
 =1
 HTTP11F.inc
+Dynmime.inc
+=1
+=1
+Dynmime.inc
 =1
 =1
 HTTP11T2.inc

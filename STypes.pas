@@ -1,8 +1,21 @@
+//VPSERVER 3.0 - HTTP Server
+//Copyright (C) 2009 Ivanov Viktor
+//
+//This program is free software; you can redistribute it and/or
+//modify it under the terms of the GNU General Public License
+//as published by the Free Software Foundation; either version 2
+//of the License, or (at your option) any later version.
+//
+//This program is distributed in the hope that it will be useful,
+//but WITHOUT ANY WARRANTY; without even the implied warranty of
+//MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//GNU General Public License for more details.
+
 unit STypes;
 
 interface
 
-uses {$IFDEF FPC}SysUtils, {$ENDIF}{$IFNDEF MSWINDOWS}BaseUnix, Sockets, Process, Pipes{$ELSE}Windows, WinSock2{$ENDIF};
+uses {$IFDEF FPC}SysUtils, {$ENDIF}{$IFDEF MSWINDOWS}Windows, WinSock2{$ENDIF};
 
 type
  TPStatus=(psPreAlpha, psAlpha, psBeta, psRC, psFinal);
@@ -14,7 +27,7 @@ type
  end;
  PThreadID=^TThreadID;
 {$IFNDEF FPC}
- TThreadID=Integer;
+ TThreadID=LongWord;
 {$ENDIF}
 {$ELSE}
  TRide=TRTLCriticalSelection;
@@ -32,9 +45,16 @@ type
   Recv:LongWord;
   Ride:TRide;
  end;
- TSocket={$IFNDEF MSWINDOWS}Sockets{$ELSE}WinSock2{$ENDIF}.TSocket;
+ TSocket={$IFDEF MSWINDOWS}WinSock2{$ENDIF}.TSocket;
 {$IFDEF MSWINDOWS}
  TSocketInfo=TWSAProtocol_Info;
+ TTime=TSystemTime;
+ TPipes=record
+  stdinp_r:THandle;
+  stdinp_w:THandle;
+  stdout_r:THandle;
+  stdout_w:THandle;
+ end;
 {$ENDIF}
  PParams=^TParams;
  TParams=record
@@ -45,6 +65,7 @@ type
   LogLevel:Byte;
   Sock:TSocket;
   Info:TSocketInfo;
+  LogPipe:TPipes;
   RWait:LongWord;
   KAWait:LongWord;
  end;
@@ -59,24 +80,9 @@ type
   Main:PServerRecord;
   StartupCom:String;
   StartupNum:LongWord;
-  EndCom:String;    
+  EndCom:String;
   EndNum:LongWord;
  end;
-{$IFDEF MSWINDOWS}
- TTime=TSystemTime;
- TPipes=record
-  stdinp_r:THandle;
-  stdinp_w:THandle;
-  stdout_r:THandle;
-  stdout_w:THandle;
- end;
-{$ELSE}
- TProcessInformation=TProcess;
- TPipes=record                           
-  OutP:TOutputPipeStream;
-  InP:TInputPipeStream;
- end;
-{$ENDIF}
  TServers=record
   Count:LongWord;
   Arr:Pointer;
@@ -87,11 +93,13 @@ type
   PipeIn:TextFile;
   PipeOut:TextFile;
   PI:TProcessInformation;
+  IsLogging:Boolean;
   IsStart:Boolean;
  end;
  PSettings=^TSettings;
  TSettings=record
   Params:TParams;
+  IsLogging:Boolean;
   IsStart:Boolean;
   hThread:TThreadID;
   tid:TTID;
@@ -101,7 +109,8 @@ type
   Settings:PSettings;
   Socket:TSocket;
  end;
- TCommand=(cmQuit, cmStart, cmStop);
+ TCommand=(cmQuit, cmStart, cmStop, cmStartLog, cmStopLog);
+ TMsg=Byte;
  TCommandOrd=1..sizeof(TCommand)*sizeof(Byte);
  membuf=^statbuf;
  statbuf=array[1..MaxInt] of Byte;
@@ -116,7 +125,7 @@ const
  BADMsg='BAD';
  OKMsg='OK';
  MAXLW=$FFFFFFFF;
- 
+
 {$I Config.inc}
 
 implementation
