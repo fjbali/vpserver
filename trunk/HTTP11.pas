@@ -20,6 +20,12 @@ uses STypes;
 {$DEFINE DYNMIME}
 
 procedure ProccessRequest(const Socket:TSocket;const Params:PParams);
+{$IFDEF DYNMIME}
+procedure MimeInit;
+{$ENDIF}
+{$IFDEF DYNMIME}
+procedure MimeDestroy;
+{$ENDIF}
 
 implementation
 
@@ -92,7 +98,7 @@ var
 var
  s:String;
 begin
- CLine:=0; 
+ CLine:=0;
  FillChar(Data, sizeof(Data), 0);
  repeat
 {$I-}
@@ -231,7 +237,7 @@ begin
      I:=SendBuf(GetFileSockRecord(Sock)^, Buf.Buf^, Buf.Size, TimeOut, RealSent);
      FreeMem(Buf.Buf);
      if (I<>0) or (RealSent<>Buf.Size) or TimeOut then
-      break;                                          
+      break;
      Buf.Size:=0;
     end;
   end;
@@ -264,7 +270,7 @@ begin
     end;
    if Response.ToRecv<>0 then
     begin
-     GetMem(p, Response.ToRecv);    
+     GetMem(p, Response.ToRecv);
      RecvBuf(GetFileSockRecord(SockIn)^, p^, Response.ToRecv, TimeOut, Response.ToRecv);
      FreeMem(p);
      if TimeOut then
@@ -279,12 +285,4 @@ begin
  Close(SockOut);
 end;
 
-{$IF DECLARED(MimeInit)}
-initialization
- MimeInit;
-{$IFEND}
-{$IF DECLARED(MimeDestroy)}
-finalization
- MimeDestroy;
-{$IFEND}
 end.

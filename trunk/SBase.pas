@@ -1031,7 +1031,7 @@ begin
   {Удаляем список}
   if tids<>nil then
    FreeMem(tids);
- end;    
+ end;
  ServerThread:=GetLastError;
 end;
 
@@ -1132,6 +1132,10 @@ const
 var
  Com:TCommand;
 begin
+{$IF DECLARED(MimeInit)}
+ {Инициализация mime-менеджера}
+ MimeInit;
+{$IFEND}
  while true do
   begin
    {Принимаем команду}
@@ -1141,6 +1145,10 @@ begin
    {Выполняем}
    cmhndrs[Com](Settings);
   end;
+{$IF DECLARED(MimeDestroy)}
+ {Сообщаем mime-менджеру о завершении}
+ MimeDestroy;
+{$IFEND}
 end;
 
 {--------- Mode Server End ----------}
