@@ -26,7 +26,7 @@ const
 {$ELSE}
 function FindMime(const URI:String):String;
 var
- ms, s:String;
+ ms, s, ext:String;
  Mime:TextFile;
 begin
  s:=URI;
@@ -56,9 +56,10 @@ begin
  while not Eof(Mime) do
   begin
    readln(Mime, ms);
-   if copy(ms, 1, Pos(' ', ms)-1)=s then
+   ext:=copy(ms, 1, Pos(' ', ms)-1);
+   if ext=s then
     begin
-     Delete(ms, 1, Pos(' ', ms));
+     Delete(ms, 1, Length(ext)+1);
      Result:=ms;
      break;
     end;
