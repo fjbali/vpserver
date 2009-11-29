@@ -150,7 +150,7 @@ initialization
  t3:='0';
 {$IFEND}
  Str(VER:0:1, t4);
- Str(BUILDVER, t5);
+ Str(BUILDVER:0:2, t5);
  BUILD:=t1+t2+t3+t5;
  case SSTATUS of
   psPreAlpha:
