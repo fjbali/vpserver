@@ -19,7 +19,7 @@ const
 {$IFEND}
  VER=3.0;
  SNAME='VPSERVER';
- BUILDVER=1.1;
+ BUILDVER=1.2;
  TermTimeout=1000;
  BufS=4096;
  SSTATUS=psAlpha;

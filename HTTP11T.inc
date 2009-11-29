@@ -224,7 +224,8 @@ begin
 end;
 
 procedure ExtBody(var Body:TEntityBody);
-var P:PExtBodyData;
+var
+ P:PExtBodyData;
 begin
  New(P);
  FillChar(P^, sizeof(P^), 0);
@@ -329,7 +330,8 @@ begin
 end;
 
 procedure FreeResponse(var Response:THTTPResponse);
-var P:PBodyRange;
+var
+ P:PBodyRange;
 begin
  if Response.Headers.Count<>0 then
   DeleteHeaders(Response.Headers);

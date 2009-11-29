@@ -94,7 +94,8 @@ procedure ShowLogo;
 
   {Вывести ><}
   procedure ShowSubLogo;
-  var n:Integer;
+  var
+   n:Integer;
   begin
    ShowSpace;
    for n:=0 to (Length(SERV) div 2) do
@@ -122,6 +123,8 @@ end;
 
 {Устанавливить команды запуска}
 function SetStartupCommands(var Conf:TConfig;var curserv:PServerRecord;val:String;var Wait:Boolean):Boolean;
+var
+ t, c:PStringC;
 begin
  SetStartupCommands:=true;
  if val='' then
@@ -131,12 +134,24 @@ begin
    Exit;
   end;
  {Добавляем команду}
- Conf.StartupCom:=Conf.StartupCom+val+#10;
- inc(Conf.StartupNum);
+ New(t);
+ t^.Next:=nil;
+ t^.S:=val;
+ if Conf.StartupCom=nil then
+  Conf.StartupCom:=t
+ else
+  begin
+   c:=Conf.StartupCom;
+   while c^.Next<>nil do
+    c:=c^.Next;
+   c^.Next:=t;
+  end;
 end;
 
 {Устанавливить команды выхода}
 function SetEndCommands(var Conf:TConfig;var curserv:PServerRecord;val:String;var Wait:Boolean):Boolean;
+var
+ t, c:PStringC;
 begin
  SetEndCommands:=true;
  if val='' then
@@ -146,8 +161,18 @@ begin
    Exit;
   end;
  {Добавляем команду}
- Conf.EndCom:=Conf.EndCom+val+#10;
- inc(Conf.EndNum);
+ New(t);
+ t^.Next:=nil;
+ t^.S:=val;
+ if Conf.EndCom=nil then
+  Conf.EndCom:=t
+ else
+  begin
+   c:=Conf.EndCom;
+   while c^.Next<>nil do
+    c:=c^.Next;
+   c^.Next:=t;
+  end;
 end;
 
 {Установить домашнюю папку}
@@ -377,8 +402,9 @@ end;
 
 {Найти сервер в куче}
 function FindServer(const Records:PServerRecord;const Name:String):Integer;
-var T:PServerRecord;
-    C:Integer;
+var
+ T:PServerRecord;
+ C:Integer;
 begin
  FindServer:=-1;
  T:=Records;
@@ -752,25 +778,26 @@ var
  Com, Param:String;
  I:Integer;
  R:LongWord;
- P1:PLongWord;
- P2:PString;
+ P, t:PStringC;
+ Q:Boolean;
 begin
  ConsoleLog('Запуск командной строки...');
  {Подготовка к диалогу}
  StartDialog;
- P1:=@Config.StartupNum;
- P2:=@Config.StartupCom;
+ P:=Config.StartupCom;
+ Q:=false;
  while true do
   begin
-   if P1^>0 then
+   if P<>nil then
     begin {Выполнить команду из списка}
-     Param:=copy(P2^, 1, Pos(#10, P2^)-1);
-     Delete(P2^, 1, Length(Param)+1);
+     Param:=P^.S;
+     t:=P;
+     P:=P^.Next;
+     Dispose(t);
      WriteInputLine(Param);
-     dec(P1^);
     end
    else
-    if P1=@Config.EndNum then
+    if Q then
      break {Выходим}
     else
      Param:=GetInputLine; {Читаем команду}
@@ -786,9 +813,9 @@ begin
    Crop(Param);
    Com:=UpString(Com);
    if Com='QUIT' then
-    begin {Переключаем списки}
-     P1:=@Config.EndNum;
-     P2:=@Config.EndCom;
+    begin {Переключаем список}
+     P:=Config.EndCom;
+     Q:=true;
      continue;
     end;
    {Ищем команду}
@@ -901,9 +928,10 @@ end;
 
 {Найти место для нового потока}
 function FindNewTID(var Tids:Pointer):PThreadID;
-var s, p, t:LongWord;
-    N:Pointer;
-    i:Boolean;
+var
+ s, p, t:LongWord;
+ N:Pointer;
+ i:Boolean;
 begin
  if Tids=nil then
   begin {Первый поток}
@@ -967,7 +995,8 @@ end;
 
 {Удалить все потоки}
 procedure CloseAllTIDS(Tids:Pointer);
-var p:LongWord;
+var
+ p:LongWord;
 begin
  if Tids=nil then
   Exit;
@@ -1071,7 +1100,8 @@ end;
 
 {Команда остановки сервера}
 procedure cmStopProc(var Settings:TSettings);
-var R:LongWord;
+var
+ R:LongWord;
 begin
  if not Settings.IsStart then
   begin {Не запущен}
@@ -1092,7 +1122,8 @@ begin
 end;
 
 procedure cmStartLogProc(var Settings:TSettings);
-var I:LongWord;
+var
+ I:LongWord;
 begin
  if Settings.IsLogging then
   begin

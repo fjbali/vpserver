@@ -127,8 +127,9 @@ begin
 end;
 
 function OpenPipe(var Inp, Outp:TextFile;const Pipe:TPipes):Integer;
-var fm:Byte;
-    r:Integer;
+var
+ fm:Byte;
+ r:Integer;
 begin
  AssignPipe(Inp, Pipe.stdout_r, Pipe.stdout_w);
  AssignPipe(Outp, Pipe.stdinp_w, Pipe.stdinp_r);
@@ -195,8 +196,9 @@ begin
 end;
 
 function CreateEmptyPipe(out Pipe:TPipes):LongWord;
-var OK:Boolean;
-    SA:TSecurityAttributes;
+var
+ OK:Boolean;
+ SA:TSecurityAttributes;
 begin
  FillChar(SA, sizeof(SA), 0);
  with SA do
@@ -219,7 +221,8 @@ begin
 end;
 
 function DuplicatePipe(const InPipe:TPipes;out OutPipe:TPipes;const Proc:THandle):LongWord;
-var OK:Boolean;
+var
+ OK:Boolean;
 begin
  OK:=DuplicateHandle(GetCurrentProcess, InPipe.stdinp_r, Proc, @OutPipe.stdinp_r, 0, true, DUPLICATE_SAME_ACCESS);
  if OK then

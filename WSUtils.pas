@@ -39,7 +39,8 @@ implementation
 
 {$IFDEF MSWINDOWS}
 procedure IgnoreIntr();
-var l:LongWord;
+var
+ l:LongWord;
 begin
  l:=WSAGetLastError;
  if (l=WSAECONNABORTED) or (l=WSAEINTR) or (l=WSAECONNREFUSED) or (l=WSAECONNRESET) or (l=WSAENETRESET) or (l=WSA_OPERATION_ABORTED) then
@@ -294,7 +295,8 @@ end;
 
 {-------------------------------End}
 
-var Data:TWSAData;
+var
+ Data:TWSAData;
 
 initialization
  if WSAStartup(WINSOCK_VERSION, Data)<>0 then

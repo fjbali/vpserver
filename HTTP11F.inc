@@ -232,8 +232,9 @@ begin
 end;
 
 procedure RangeHPC(var Data:Pointer;var Response:THTTPResponse);
-var S, L, T:String;
-    P, N:PBodyRange;
+var
+ S, L, T:String;
+ P, N:PBodyRange;
 begin
  S:=PString(Data)^;
  Dispose(PString(Data));
@@ -344,7 +345,8 @@ begin
 end;
 
 function SingleRangeDynFunct(var Data:Pointer;const S:LongWord=BufS):TEntityBodyStat;
-var L:LongWord;
+var
+ L:LongWord;
 begin
  with PSingleRangeData(Data)^ do
   begin
@@ -365,10 +367,11 @@ begin
 end;
 
 function AcceptRangesHA(out Data:Pointer;var Response:THTTPResponse):Boolean;
-var Err, m:Boolean;
-    P:PBodyRange;
-    D:PPartialContentData;
-    D2:PSingleRangeData;
+var
+ Err, m:Boolean;
+ P:PBodyRange;
+ D:PPartialContentData;
+ D2:PSingleRangeData;
 begin
  AcceptRangesHA:=true;
  New(PBoolean(Data));
@@ -474,8 +477,9 @@ const
  ContentLengthH='Content-Length: ';
 
 function ContentLengthHM(const Header:String;out Data:Pointer):Boolean;
-var L:PLongInt;
-    T:String;
+var
+ L:PLongInt;
+ T:String;
 begin
  Result:=copy(Header, 1, Length(ContentLengthH))=ContentLengthH;
  if Result then
@@ -616,7 +620,8 @@ const
  KeepAliveV='Keep-Alive';
 
 function ConnectionHM(const Header:String;out Data:Pointer):Boolean;
-var T:String;
+var
+ T:String;
 begin
  Result:=copy(Header, 1, Length(ConnectionH))=ConnectionH;
  if Result then
@@ -686,8 +691,9 @@ const
  );
 
 function PartialContentDynFunct(var Data:Pointer;const S:LongWord=BufS):TEntityBodyStat;
-var L:LongWord;
-    str:String;
+var
+ L:LongWord;
+ str:String;
 begin
  FillChar(Result, sizeof(Result), 0);
  with PPartialContentData(Data)^ do

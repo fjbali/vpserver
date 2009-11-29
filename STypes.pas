@@ -37,6 +37,11 @@ type
 {$ELSE}
  TTID=LongWord;
 {$ENDIF}
+ PStringC=^TStringC;
+ TStringC=record
+  Next:PStringC;
+  S:String;
+ end;
  PSockRecord=^TSockRecord;
  TSockRecord=record
   Socket:TSocket;
@@ -78,10 +83,8 @@ type
   AmServers:Byte;
   ServerRecords:PServerRecord;
   Main:PServerRecord;
-  StartupCom:String;
-  StartupNum:LongWord;
-  EndCom:String;
-  EndNum:LongWord;
+  StartupCom:PStringC;
+  EndCom:PStringC;
  end;
  TServers=record
   Count:LongWord;
@@ -147,7 +150,7 @@ initialization
  t3:='0';
 {$IFEND}
  Str(VER:0:1, t4);
- Str(BUILDVER:0:1, t5);
+ Str(BUILDVER, t5);
  BUILD:=t1+t2+t3+t5;
  case SSTATUS of
   psPreAlpha:
