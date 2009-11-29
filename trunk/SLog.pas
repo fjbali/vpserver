@@ -62,7 +62,8 @@ begin
 end;
 
 procedure ConsoleLog(const Msg:String);
-var Sh:String;
+var
+ Sh:String;
 begin
  StartRide(Ride);
  if InterlockedIncrement(cons)<>1 then
